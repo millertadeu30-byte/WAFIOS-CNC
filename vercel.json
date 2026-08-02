@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/analyze-drawing", "destination": "/api/analyze-drawing" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
