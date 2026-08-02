@@ -1,0 +1,6 @@
+{
+  "name": "Simulador de Dobra WAFIOS",
+  "description": "Simulador e visualizador 3D interativo de programação para máquinas de dobrar fios WAFIOS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
