@@ -4,7 +4,9 @@
  */
 
 import React from 'react';
-import { BenderStep } from '../types';
+import { ChevronUp, ChevronDown } from 'lucide-react';
+import { BenderStep, RotationMode } from '../types';
+import { calculateCumulativeTorsions, enforceTorsionAndCorteRules, getTorsionValidationErrors } from '../utils/rules';
 
 interface ProgramTableProps {
   steps: BenderStep[];
@@ -14,6 +16,7 @@ interface ProgramTableProps {
   selectedStepIndex: number | null;
   onSelectStep: (idx: number | null) => void;
   wireDiameter: number;
+  rotationMode?: RotationMode;
 }
 
 export default function ProgramTable({
@@ -24,15 +27,20 @@ export default function ProgramTable({
   selectedStepIndex,
   onSelectStep,
   wireDiameter,
+  rotationMode = 'relative',
 }: ProgramTableProps) {
   
+  // Calculate cumulative torsion for each row
+  const cumulativeTorsions = calculateCumulativeTorsions(steps, rotationMode);
+  const torsionErrors = getTorsionValidationErrors(steps, rotationMode);
+
   // Handle cell edit change
   const handleCellChange = (
     stepId: string,
     field: keyof BenderStep,
     value: string
   ) => {
-    const updatedSteps = steps.map((step) => {
+    const rawUpdatedSteps = steps.map((step) => {
       if (step.id !== stepId) return step;
 
       let parsedValue: any = null;
@@ -48,31 +56,27 @@ export default function ProgramTable({
         [field]: parsedValue,
       };
     });
-    onStepsChange(updatedSteps);
+
+    const enforced = enforceTorsionAndCorteRules(rawUpdatedSteps, rotationMode);
+    onStepsChange(enforced);
   };
 
   const handleDesenhoChange = (stepId: string, value: string) => {
-    const updatedSteps = steps.map((step) => {
+    const rawUpdatedSteps = steps.map((step) => {
       if (step.id !== stepId) return step;
 
       const num = parseFloat(value);
       if (isNaN(num)) {
-        // If they clear it, maybe we don't do anything or clear AC
         return { ...step, ac: null };
       }
 
-      // Drawing Angle = 180 - |AC + ACCorr|
-      // |AC + ACCorr| = 180 - Drawing Angle
-      const absNewAcTotal = 180 - num;
+      // Drawing Angle = 180 - |AC|
+      const absNewAc = 180 - num;
       
       // Determine the sign based on previous AC (default to positive if null/0)
       const isNegative = step.ac !== null && step.ac < 0;
-      let newAc = isNegative ? -absNewAcTotal : absNewAcTotal;
-      
-      // Subtract the correction to get the base AC
-      newAc = newAc - (step.acCorr || 0);
+      let newAc = isNegative ? -absNewAc : absNewAc;
 
-      // Keep it nicely formatted to 1 decimal place to avoid floating point errors
       newAc = parseFloat(newAc.toFixed(2));
 
       return {
@@ -80,8 +84,112 @@ export default function ProgramTable({
         ac: newAc,
       };
     });
-    onStepsChange(updatedSteps);
+
+    const enforced = enforceTorsionAndCorteRules(rawUpdatedSteps, rotationMode);
+    onStepsChange(enforced);
   };
+
+  // Increment or decrement numeric cell by delta
+  const handleStepDelta = (
+    stepId: string,
+    field: keyof BenderStep,
+    delta: number
+  ) => {
+    const rawUpdatedSteps = steps.map((step) => {
+      if (step.id !== stepId) return step;
+
+      const currentVal = step[field] === null || step[field] === undefined ? 0 : Number(step[field]);
+      const newVal = parseFloat((currentVal + delta).toFixed(2));
+
+      return {
+        ...step,
+        [field]: newVal,
+      };
+    });
+
+    const enforced = enforceTorsionAndCorteRules(rawUpdatedSteps, rotationMode);
+    onStepsChange(enforced);
+  };
+
+  // Incremental change for Drawing Angle (internal included angle)
+  const handleDesenhoDelta = (stepId: string, delta: number) => {
+    const step = steps.find((s) => s.id === stepId);
+    if (!step) return;
+
+    // Calculate current included drawing angle = 180 - |AC|
+    const currentDrawing = 180 - Math.abs(step.ac || 0);
+
+    const newDrawing = Math.max(0, Math.min(180, parseFloat((currentDrawing + delta).toFixed(2))));
+    handleDesenhoChange(stepId, newDrawing.toString());
+  };
+
+  // Render discreet up/down micro steppers
+  const renderMicroStepper = (
+    stepId: string,
+    field: keyof BenderStep,
+    stepDelta: number = 1,
+    activeHoverColor: string = 'hover:bg-purple-600'
+  ) => (
+    <div className="absolute right-[2px] top-1/2 -translate-y-1/2 flex flex-col justify-center gap-[1px] opacity-20 hover:opacity-100 group-hover/stepper:opacity-90 transition-opacity z-10 pointer-events-auto">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation();
+          const mult = e.shiftKey ? 10 : 1;
+          handleStepDelta(stepId, field, stepDelta * mult);
+        }}
+        className={`h-[11px] w-[13px] flex items-center justify-center bg-[#1A1F2C] ${activeHoverColor} hover:text-white text-slate-400 rounded-[2px] transition-colors border border-slate-700/50 shadow-sm`}
+        title={`Aumentar +${stepDelta} (Segure Shift para +${stepDelta * 10})`}
+      >
+        <ChevronUp className="w-2.5 h-2.5 stroke-[3]" />
+      </button>
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation();
+          const mult = e.shiftKey ? 10 : 1;
+          handleStepDelta(stepId, field, -stepDelta * mult);
+        }}
+        className={`h-[11px] w-[13px] flex items-center justify-center bg-[#1A1F2C] ${activeHoverColor} hover:text-white text-slate-400 rounded-[2px] transition-colors border border-slate-700/50 shadow-sm`}
+        title={`Diminuir -${stepDelta} (Segure Shift para -${stepDelta * 10})`}
+      >
+        <ChevronDown className="w-2.5 h-2.5 stroke-[3]" />
+      </button>
+    </div>
+  );
+
+  const renderDesenhoStepper = (stepId: string) => (
+    <div className="absolute right-[2px] top-1/2 -translate-y-1/2 flex flex-col justify-center gap-[1px] opacity-20 hover:opacity-100 group-hover/stepper:opacity-90 transition-opacity z-10 pointer-events-auto">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation();
+          const mult = e.shiftKey ? 10 : 1;
+          handleDesenhoDelta(stepId, 1 * mult);
+        }}
+        className="h-[11px] w-[13px] flex items-center justify-center bg-[#1A1F2C] hover:bg-blue-600 hover:text-white text-slate-400 rounded-[2px] transition-colors border border-slate-700/50 shadow-sm"
+        title="Aumentar +1° no desenho (Segure Shift para +10°)"
+      >
+        <ChevronUp className="w-2.5 h-2.5 stroke-[3]" />
+      </button>
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={(e) => {
+          e.stopPropagation();
+          const mult = e.shiftKey ? 10 : 1;
+          handleDesenhoDelta(stepId, -1 * mult);
+        }}
+        className="h-[11px] w-[13px] flex items-center justify-center bg-[#1A1F2C] hover:bg-blue-600 hover:text-white text-slate-400 rounded-[2px] transition-colors border border-slate-700/50 shadow-sm"
+        title="Diminuir -1° no desenho (Segure Shift para -10°)"
+      >
+        <ChevronDown className="w-2.5 h-2.5 stroke-[3]" />
+      </button>
+    </div>
+  );
 
   // Add a new row
   const handleAddRow = () => {
@@ -90,22 +198,28 @@ export default function ProgramTable({
       id: crypto.randomUUID(),
       n: nextN,
       l: 25, // default feed length
+      w: null,
       esp: null,
-      ap: null,
+      ap: 0,
       apCorr: null,
-      ac: null,
+      ac: 0,
       acCorr: null,
-      r: 1.5, // default standard bend radius
-      comment: '',
+      r: 1.5,
+      comment: 'Corte E',
     };
-    onStepsChange([...steps, newStep]);
+    
+    // Previous last row becomes a normal step; new step becomes Corte E
+    const updated = [...steps, newStep];
+    const enforced = enforceTorsionAndCorteRules(updated, rotationMode);
+    onStepsChange(enforced);
   };
 
   // Remove the last row
   const handleRemoveLastRow = () => {
-    if (steps.length <= 1) return; // keep at least 1 row
+    if (steps.length <= 1) return;
     const updated = steps.slice(0, -1);
-    onStepsChange(updated);
+    const enforced = enforceTorsionAndCorteRules(updated, rotationMode);
+    onStepsChange(enforced);
     if (selectedStepIndex === steps.length) {
       onSelectStep(null);
     }
@@ -115,12 +229,12 @@ export default function ProgramTable({
   const handleDeleteRow = (idxToDelete: number) => {
     if (steps.length <= 1) return;
     const filtered = steps.filter((s) => s.n !== idxToDelete);
-    // Reindex
     const reindexed = filtered.map((step, idx) => ({
       ...step,
       n: idx + 1,
     }));
-    onStepsChange(reindexed);
+    const enforced = enforceTorsionAndCorteRules(reindexed, rotationMode);
+    onStepsChange(enforced);
     if (selectedStepIndex === idxToDelete || selectedStepIndex === steps.length) {
       onSelectStep(null);
     }
@@ -132,13 +246,14 @@ export default function ProgramTable({
       id: crypto.randomUUID(),
       n: 1,
       l: 10,
+      w: null,
       esp: null,
-      ap: null,
+      ap: 0,
       apCorr: null,
-      ac: null,
+      ac: 0,
       acCorr: null,
       r: 1.5,
-      comment: 'Início',
+      comment: 'Corte E',
     };
     onStepsChange([initialStep]);
     onSelectStep(null);
@@ -154,7 +269,7 @@ export default function ProgramTable({
   return (
     <div className="flex flex-col h-full" id="program-table-root">
       {/* Table Actions bar */}
-      <div className="flex justify-between items-center mb-4" id="table-actions-container">
+      <div className="flex justify-between items-center mb-3" id="table-actions-container">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold bg-[#2D3748] text-[#E2E8F0] py-1 px-2.5 rounded-md uppercase tracking-wider font-mono border border-[#4A5568]">
             Tabela de Coordenadas
@@ -206,21 +321,25 @@ export default function ProgramTable({
               <th className="py-3 px-2 text-center w-16">Tipo (X*)</th>
               <th className="py-3 px-2 text-center w-24">Avanço (L)</th>
               <th className="py-3 px-2 text-center w-16">Esp</th>
-              <th className="py-3 px-2 text-center w-24">Torção (AP)</th>
-              <th className="py-3 px-2 text-center w-16">+/- (AP)</th>
-              <th className="py-3 px-2 text-center w-24">Dobra (AC)</th>
-              <th className="py-3 px-2 text-center w-16">Corr (D)</th>
-              <th className="py-3 px-2 text-center w-14">Raio (r)</th>
+              <th className="py-3 px-2 text-center w-28">
+                <div>Torção (AP)</div>
+                <div className="text-[9px] text-purple-400/80 font-sans font-normal lowercase">(máx ±200° acum.)</div>
+              </th>
+              <th className="py-3 px-2 text-center w-28">Dobra (AC)</th>
+              <th className="py-3 px-2 text-center w-16">Raio (r)</th>
               <th className="py-3 px-2 text-center w-20 text-blue-400 font-semibold bg-blue-950/20 border-l border-[#2D3748]">Desenho*</th>
               <th className="py-3 px-3">Comentários</th>
               <th className="py-3 px-2 text-center w-10"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2D3748]/30">
-            {steps.map((step) => {
+            {steps.map((step, idx) => {
               const isHovered = hoveredStepIndex === step.n;
               const isSelected = selectedStepIndex === step.n;
-              const isLastRow = step.n === steps.length;
+              const isLastRow = idx === steps.length - 1;
+              const accumTorsion = cumulativeTorsions[idx] || 0;
+              const isTorsionExceeded = !isLastRow && Math.abs(accumTorsion) > 200;
+              const isTorsionAtLimit = !isLastRow && Math.abs(accumTorsion) === 200;
 
               // Color palette for step markers matching the 3D viewer
               const stepColors = [
@@ -230,8 +349,8 @@ export default function ProgramTable({
               const markerColor = stepColors[(step.n - 1) % stepColors.length];
 
               // Drawing Angle: Included angle 180 - |AC|
-              const drawingAngleValue = step.ac !== null && step.ac !== 0 
-                ? parseFloat((180 - Math.abs(step.ac + (step.acCorr || 0))).toFixed(1))
+              const drawingAngleValue = !isLastRow && step.ac !== null && step.ac !== 0 
+                ? parseFloat((180 - Math.abs(step.ac)).toFixed(1))
                 : '';
 
               return (
@@ -260,121 +379,145 @@ export default function ProgramTable({
                   {/* Bend shape icon */}
                   <td className="py-2 px-1 text-center font-sans text-[10px] font-medium">
                     <span className={`px-1.5 py-0.5 rounded ${
-                      step.ac === null || step.ac === 0 
+                      isLastRow || step.ac === null || step.ac === 0 
                         ? 'text-[#718096]' 
                         : step.ac > 0 
                           ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/60' 
                           : 'bg-indigo-950/40 text-indigo-400 border border-indigo-900/60'
                     }`}>
-                      {getBendDirectionIcon(step.ac)}
+                      {isLastRow ? '✂️ Corte' : getBendDirectionIcon(step.ac)}
                     </span>
                   </td>
 
                   {/* Feed L */}
                   <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      min="0.1"
-                      placeholder="0"
-                      value={step.l === null ? '' : step.l}
-                      onChange={(e) => handleCellChange(step.id, 'l', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748] focus:border-blue-500 text-slate-100 font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
+                    <div className="relative flex items-center group/stepper w-full">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.1"
+                        placeholder="0"
+                        value={step.l === null ? '' : step.l}
+                        onChange={(e) => handleCellChange(step.id, 'l', e.target.value)}
+                        className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 pl-1 pr-4 rounded border border-[#2D3748] focus:border-blue-500 text-slate-100 font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-[12px]"
+                      />
+                      {renderMicroStepper(step.id, 'l', 1, 'hover:bg-blue-600')}
+                    </div>
                   </td>
 
                   {/* Esp parameter */}
                   <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder=""
-                      value={step.esp === null ? '' : step.esp}
-                      onChange={(e) => handleCellChange(step.id, 'esp', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-slate-300"
-                    />
+                    <div className="relative flex items-center group/stepper w-full">
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder=""
+                        disabled={isLastRow}
+                        value={step.esp === null ? '' : step.esp}
+                        onChange={(e) => handleCellChange(step.id, 'esp', e.target.value)}
+                        className="w-full bg-[#0F1115] disabled:opacity-40 hover:bg-[#171923] focus:bg-[#171923] text-center py-1 pl-1 pr-4 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-slate-300 text-[12px]"
+                      />
+                      {!isLastRow && renderMicroStepper(step.id, 'esp', 1, 'hover:bg-slate-600')}
+                    </div>
                   </td>
 
                   {/* Twist AP */}
                   <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="—"
-                      value={step.ap === null ? '' : step.ap}
-                      onChange={(e) => handleCellChange(step.id, 'ap', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748] focus:border-blue-500 text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-purple-400"
-                    />
-                  </td>
-
-                  {/* AP Correction */}
-                  <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder=""
-                      value={step.apCorr === null ? '' : step.apCorr}
-                      onChange={(e) => handleCellChange(step.id, 'apCorr', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-orange-400"
-                    />
+                    {isLastRow ? (
+                      <div className="w-full bg-[#0F1115]/80 py-1 rounded border border-[#2D3748]/40 text-center font-bold text-slate-500 text-[11px]" title="Linha de corte não possui torção (AP = 0°)">
+                        0° <span className="text-[9px] text-purple-400/70 font-sans lowercase font-normal">(corte)</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="relative flex items-center group/stepper w-full">
+                          <input
+                            type="number"
+                            step="any"
+                            placeholder="0"
+                            value={step.ap === null ? '' : step.ap}
+                            onChange={(e) => handleCellChange(step.id, 'ap', e.target.value)}
+                            className={`w-full text-center py-1 pl-1 pr-4 rounded border font-bold focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-[12px] ${
+                              isTorsionExceeded
+                                ? 'bg-red-950/40 text-red-300 border border-red-500/80 focus:border-red-400'
+                                : isTorsionAtLimit
+                                  ? 'bg-[#0F1115] text-amber-300 border-amber-500 ring-1 ring-amber-500/50'
+                                  : 'bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] border-[#2D3748] focus:border-blue-500 text-purple-400'
+                            }`}
+                          />
+                          {renderMicroStepper(step.id, 'ap', 1, isTorsionExceeded ? 'hover:bg-red-600' : 'hover:bg-purple-600')}
+                        </div>
+                        <div className="flex justify-between items-center px-1 text-[9px]">
+                          <span className={isTorsionExceeded ? 'text-red-400 font-semibold' : 'text-[#A0AEC0]'}>Acum:</span>
+                          <span className={`font-mono font-bold ${isTorsionExceeded ? 'text-red-400' : isTorsionAtLimit ? 'text-amber-400' : 'text-purple-300'}`}>
+                            {accumTorsion > 0 ? `+${accumTorsion.toFixed(1)}°` : `${accumTorsion.toFixed(1)}°`}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </td>
 
                   {/* Bend AC */}
                   <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder={isLastRow ? 'Corte' : '—'}
-                      value={step.ac === null ? '' : step.ac}
-                      onChange={(e) => handleCellChange(step.id, 'ac', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748] focus:border-blue-500 text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-orange-400"
-                    />
-                  </td>
-
-                  {/* Bending Correction D */}
-                  <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder=""
-                      value={step.acCorr === null ? '' : step.acCorr}
-                      onChange={(e) => handleCellChange(step.id, 'acCorr', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-orange-400"
-                    />
+                    {isLastRow ? (
+                      <div className="w-full bg-[#0F1115]/80 py-1 rounded border border-[#2D3748]/40 text-center font-bold text-slate-500 text-[11px]" title="Linha de corte não possui dobra (AC = 0°)">
+                        0° <span className="text-[9px] text-orange-400/70 font-sans lowercase font-normal">(corte)</span>
+                      </div>
+                    ) : (
+                      <div className="relative flex items-center group/stepper w-full">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="0"
+                          value={step.ac === null ? '' : step.ac}
+                          onChange={(e) => handleCellChange(step.id, 'ac', e.target.value)}
+                          className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 pl-1 pr-4 rounded border border-[#2D3748] focus:border-blue-500 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-orange-400 text-[12px]"
+                        />
+                        {renderMicroStepper(step.id, 'ac', 1, 'hover:bg-orange-600')}
+                      </div>
+                    )}
                   </td>
 
                   {/* Radius r */}
                   <td className="py-1 px-1">
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="1.5"
-                      value={step.r}
-                      onChange={(e) => handleCellChange(step.id, 'r', e.target.value)}
-                      className="w-full bg-[#0F1115] hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-slate-300"
-                    />
+                    <div className="relative flex items-center group/stepper w-full">
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="1.5"
+                        disabled={isLastRow}
+                        value={step.r}
+                        onChange={(e) => handleCellChange(step.id, 'r', e.target.value)}
+                        className="w-full bg-[#0F1115] disabled:opacity-40 hover:bg-[#171923] focus:bg-[#171923] text-center py-1 pl-1 pr-4 rounded border border-[#2D3748]/80 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-slate-300 text-[12px]"
+                      />
+                      {!isLastRow && renderMicroStepper(step.id, 'r', 0.25, 'hover:bg-slate-600')}
+                    </div>
                   </td>
 
                   {/* Drawing included angle */}
                   <td className="py-1 px-1 bg-blue-950/20 border-l border-[#2D3748]">
-                    <div className="relative w-full flex items-center justify-center">
-                      <input
-                        type="number"
-                        step="any"
-                        placeholder="—"
-                        value={drawingAngleValue}
-                        onChange={(e) => handleDesenhoChange(step.id, e.target.value)}
-                        className="w-full bg-transparent hover:bg-[#171923] focus:bg-[#171923] text-center py-1 rounded border border-transparent focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-sans font-bold text-blue-400"
-                      />
-                      {drawingAngleValue !== '' && <span className="absolute right-1 text-blue-400 font-bold pointer-events-none text-xs">°</span>}
-                    </div>
+                    {isLastRow ? (
+                      <div className="text-center font-bold text-slate-500 text-[11px]">180°</div>
+                    ) : (
+                      <div className="relative w-full flex items-center justify-center group/stepper">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="—"
+                          value={drawingAngleValue}
+                          onChange={(e) => handleDesenhoChange(step.id, e.target.value)}
+                          className="w-full bg-transparent hover:bg-[#171923] focus:bg-[#171923] text-center py-1 pl-1 pr-5 rounded border border-transparent focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-sans font-bold text-blue-400 text-[12px]"
+                        />
+                        {drawingAngleValue !== '' && <span className="absolute right-4 text-blue-400/80 font-bold pointer-events-none text-[10px]">°</span>}
+                        {renderDesenhoStepper(step.id)}
+                      </div>
+                    )}
                   </td>
 
                   {/* User Comment */}
                   <td className="py-1 px-2">
                     <input
                       type="text"
-                      placeholder="ex: Dobra interna"
+                      placeholder={isLastRow ? 'Corte E' : 'ex: Dobra interna'}
                       value={step.comment}
                       onChange={(e) => handleCellChange(step.id, 'comment', e.target.value)}
                       className="w-full bg-transparent hover:bg-[#0F1115]/40 focus:bg-[#0F1115] px-2 py-1 rounded border border-transparent focus:border-[#2D3748] text-left text-slate-400 focus:text-slate-200 focus:outline-none text-[11px]"
@@ -405,14 +548,18 @@ export default function ProgramTable({
         </table>
       </div>
 
-      <div className="mt-2 text-[11px] text-[#A0AEC0] flex flex-col gap-1 px-2.5 bg-[#171923] py-2.5 rounded-lg border border-[#2D3748]" id="table-disclaimer">
-        <p className="flex items-center gap-1">
-          <span className="text-orange-400 font-bold font-sans">*Dica:</span>
-          <span><b>Ângulo do Desenho</b> calcula automaticamente o ângulo de abertura da peça conforme o desenho técnico (180° - Ângulo de Dobra).</span>
+      <div className="mt-2 text-[11px] text-[#A0AEC0] flex flex-col gap-1.5 px-3 py-2.5 rounded-lg bg-[#171923] border border-[#2D3748]" id="table-disclaimer">
+        <p className="flex items-center gap-1.5">
+          <span className="text-purple-400 font-bold font-sans">⚡ Regra de Torção (AP):</span>
+          <span>A torção é acumulativa (Eixo A). A soma total das rotações não pode exceder <b>+200°</b> nem <b>-200°</b> (Ex: +180° com -180° = 0°).</span>
         </p>
-        <p className="flex items-center gap-1">
-          <span className="text-blue-400 font-bold font-sans">*Correções:</span>
-          <span>Valores inseridos em <b>Corr (D)</b> e <b>+/- (AP)</b> alteram diretamente a dobra real no gráfico 3D sem modificar o nominal.</span>
+        <p className="flex items-center gap-1.5">
+          <span className="text-emerald-400 font-bold font-sans">✂️ Regra de Corte:</span>
+          <span>A última linha da tabela representa sempre o <b>Corte final</b>, vindo obrigatoriamente com <b>AP = 0°</b> e <b>AC = 0°</b> (apenas avanço L).</span>
+        </p>
+        <p className="flex items-center gap-1.5 pt-0.5 border-t border-[#2D3748]/60 text-[10.5px]">
+          <span className="text-blue-400 font-bold font-sans">*Dica Desenho:</span>
+          <span><b>Desenho*</b> calcula o ângulo de abertura interno (180° - Ângulo de Dobra Real).</span>
         </p>
       </div>
     </div>

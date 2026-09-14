@@ -43,6 +43,11 @@ interface ThreeVisualizerProps {
   isAnimating: boolean;
   cameraActionTrigger?: { action: 'fit' | 'reset'; ts: number } | null;
   alignmentMode: 'relative' | 'nozzle';
+  cameraDirection?: { x: number; y: number; z: number } | null;
+  activeModelName?: string;
+  isFrozen?: boolean;
+  setIsFrozen?: (val: boolean) => void;
+  onStepsChange?: (steps: BenderStep[]) => void;
 }
 
 export default function ThreeVisualizer({
@@ -56,6 +61,11 @@ export default function ThreeVisualizer({
   isAnimating,
   cameraActionTrigger,
   alignmentMode,
+  cameraDirection,
+  activeModelName,
+  isFrozen = false,
+  setIsFrozen,
+  onStepsChange,
 }: ThreeVisualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
@@ -67,10 +77,136 @@ export default function ThreeVisualizer({
   const controlsRef = useRef<TrackballControls | null>(null);
   const wireGroupRef = useRef<THREE.Group | null>(null);
   const nozzleGroupRef = useRef<THREE.Group | null>(null);
+  const gridFloorRef = useRef<THREE.GridHelper | null>(null);
+  const gridVerticalRef = useRef<THREE.GridHelper | null>(null);
+  const gridWRef = useRef<THREE.GridHelper | null>(null);
 
   // Store dimensions
   const [dimensions, setDimensions] = useState({ width: 400, height: 400 });
   const [showHud, setShowHud] = useState(true);
+  const [showMachine, setShowMachine] = useState(true);
+  const [showFloorGrid, setShowFloorGrid] = useState(true);
+  const [showVerticalGrid, setShowVerticalGrid] = useState(true);
+  const [showWGrid, setShowWGrid] = useState(true);
+  const [customGDirection, setCustomGDirection] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const [isCameraLocked, setIsCameraLocked] = useState(false);
+
+  // Set camera to specific orthogonal 90° views relative to the grid
+  const handlePresetView = (view: 'top' | 'bottom' | 'left' | 'right' | 'front' | 'iso') => {
+    if (isCameraLocked) return;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const wireGroup = wireGroupRef.current;
+    if (!camera || !controls) return;
+
+    // Calculate center target of wire geometry
+    const box = new THREE.Box3().setFromObject(wireGroup || new THREE.Group());
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    if (!box.isEmpty()) {
+      box.getCenter(center);
+      box.getSize(size);
+    } else {
+      center.set(0, 0, 0);
+      size.set(40, 40, 40);
+    }
+
+    const maxDim = Math.max(size.x, size.y, size.z, 25);
+    const dist = maxDim * 2.5;
+
+    switch (view) {
+      case 'top': // Vista Superior 90° da grade
+        camera.position.set(center.x, center.y + dist, center.z + 0.001);
+        camera.up.set(0, 0, -1);
+        break;
+      case 'bottom': // Vista Inferior 90° da grade
+        camera.position.set(center.x, center.y - dist, center.z + 0.001);
+        camera.up.set(0, 0, 1);
+        break;
+      case 'left': // Vista Esquerda 90° da grade (-X)
+        camera.position.set(center.x - dist, center.y, center.z);
+        camera.up.set(0, 1, 0);
+        break;
+      case 'right': // Vista Direita 90° da grade (+X)
+        camera.position.set(center.x + dist, center.y, center.z);
+        camera.up.set(0, 1, 0);
+        break;
+      case 'front': // Vista Frontal 90° (+Z)
+        camera.position.set(center.x, center.y, center.z + dist);
+        camera.up.set(0, 1, 0);
+        break;
+      case 'iso': // Isometric 3D
+        camera.position.set(center.x + dist * 0.7, center.y + dist * 0.7, center.z + dist * 0.7);
+        camera.up.set(0, 1, 0);
+        break;
+    }
+
+    controls.target.copy(center);
+    controls.update();
+  };
+  const [padPosition, setPadPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [padScale, setPadScale] = useState(1.0);
+  const dragStartRef = useRef<{ startX: number; startY: number; posX: number; posY: number } | null>(null);
+
+  const handlePadPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('select')) {
+      return;
+    }
+    
+    const elem = e.currentTarget;
+    elem.setPointerCapture(e.pointerId);
+    
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      posX: padPosition.x,
+      posY: padPosition.y,
+    };
+    
+    e.stopPropagation();
+  };
+
+  const handlePadPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    
+    const dx = e.clientX - dragStartRef.current.startX;
+    const dy = e.clientY - dragStartRef.current.startY;
+    
+    setPadPosition({
+      x: dragStartRef.current.posX + dx,
+      y: dragStartRef.current.posY + dy,
+    });
+    
+    e.stopPropagation();
+  };
+
+  const handlePadPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    
+    const elem = e.currentTarget;
+    elem.releasePointerCapture(e.pointerId);
+    
+    dragStartRef.current = null;
+    e.stopPropagation();
+  };
+
+  // Load custom camera direction bound to these specific steps when they change
+  useEffect(() => {
+    const stepsKey = steps.map(s => `${s.l}_${s.ac}`).join('|');
+    const saved = localStorage.getItem(`wafios_custom_g_dir_${stepsKey}`);
+    if (saved) {
+      try {
+        setCustomGDirection(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse custom camera orientation', e);
+      }
+    } else {
+      setCustomGDirection(null);
+    }
+  }, [steps]);
 
   // Handle ResizeObserver
   useEffect(() => {
@@ -97,7 +233,19 @@ export default function ThreeVisualizer({
 
     camera.aspect = dimensions.width / dimensions.height;
     camera.updateProjectionMatrix();
-    renderer.setSize(dimensions.width, dimensions.height);
+
+    if (renderer.domElement) {
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.top = '0';
+      renderer.domElement.style.left = '0';
+      renderer.domElement.style.width = '100%';
+      renderer.domElement.style.height = '100%';
+      renderer.domElement.style.display = 'block';
+    }
+
+    // Pass false as 3rd parameter (updateStyle) so Three.js does NOT mutate canvas style width/height px,
+    // which eliminates the cyclic ResizeObserver loop that causes the window to shrink over time!
+    renderer.setSize(dimensions.width, dimensions.height, false);
   }, [dimensions]);
 
   // Set up Three.js Scene
@@ -109,10 +257,25 @@ export default function ThreeVisualizer({
     scene.background = new THREE.Color('#090b0e'); // Sleek Interface dark theme background
     sceneRef.current = scene;
 
-    // Add a subtle grid floor
-    const gridHelper = new THREE.GridHelper(500, 50, '#2d3748', '#121418');
-    gridHelper.position.y = -50;
-    scene.add(gridHelper);
+    // Add a subtle grid floor positioned neatly under the bocal/wire plane
+    const gridFloor = new THREE.GridHelper(500, 50, '#334155', '#1e293b');
+    gridFloor.position.y = -10;
+    scene.add(gridFloor);
+    gridFloorRef.current = gridFloor;
+
+    // Add a vertical wall grid aligned in 3D space (XY plane - Grade V)
+    const gridVertical = new THREE.GridHelper(500, 50, '#334155', '#1e293b');
+    gridVertical.rotation.x = Math.PI / 2;
+    gridVertical.position.z = -10;
+    scene.add(gridVertical);
+    gridVerticalRef.current = gridVertical;
+
+    // Add a vertical side wall grid aligned in 3D space (YZ plane - Grade W)
+    const gridW = new THREE.GridHelper(500, 50, '#334155', '#1e293b');
+    gridW.rotation.z = Math.PI / 2;
+    gridW.position.x = -10;
+    scene.add(gridW);
+    gridWRef.current = gridW;
 
     // 2. Camera setup
     const camera = new THREE.PerspectiveCamera(
@@ -126,23 +289,30 @@ export default function ThreeVisualizer({
     cameraRef.current = camera;
 
     // 3. Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(dimensions.width, dimensions.height);
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    renderer.setSize(dimensions.width, dimensions.height, false);
     renderer.shadowMap.enabled = true;
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // 4. Trackball Controls setup
+    // 4. Trackball Controls setup (Sleek, gentle, high-precision CAD control)
     const controls = new TrackballControls(camera, renderer.domElement);
-    controls.rotateSpeed = 4.0;
-    controls.zoomSpeed = 1.2;
-    controls.panSpeed = 0.8;
+    controls.rotateSpeed = 1.2; // Smooth and precise CAD rotation
+    controls.zoomSpeed = 0.9;
+    controls.panSpeed = 0.6;
     controls.noZoom = false;
     controls.noPan = false;
     controls.staticMoving = false;
-    controls.dynamicDampingFactor = 0.15;
+    controls.dynamicDampingFactor = 0.08; // Smooth deceleration and inertia
     controls.target.set(0, 0, 0);  // Center focus on bocal/nozzle
+    controls.enabled = !isCameraLocked;
     controlsRef.current = controls;
 
     // 5. Lighting
@@ -289,8 +459,60 @@ export default function ThreeVisualizer({
     parent.add(sprite);
   }
 
+  // Draw permanent highly legible sequence numbers on each joint
+  function createStepNumberLabel(parent: THREE.Group, numberText: string, pos: THREE.Vector3, isSelected: boolean, color: string) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, 128, 128);
+      
+      // We want ONLY the number, in the color of the bends ("da cor das dobras somente o numero")
+      // To ensure readability on both dark and light zones, we use a neat black outline.
+      ctx.font = isSelected ? 'bold 84px "Arial Black", Arial, sans-serif' : 'bold 70px "Arial Black", Arial, sans-serif';
+      
+      // Stroke (outline)
+      ctx.strokeStyle = '#090d16'; // Rich dark outline for contrast
+      ctx.lineWidth = 14;
+      ctx.lineJoin = 'round';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeText(numberText, 64, 64);
+      
+      // Fill with the step's specific color
+      ctx.fillStyle = color;
+      ctx.fillText(numberText, 64, 64);
+
+      if (isSelected) {
+        // Simple elegant thin outline ring around the number to indicate active selection
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(64, 64, 48, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    }
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ 
+      map: texture,
+      depthTest: false, // Force render on top of the wire so it is ALWAYS visible and sharp!
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(pos);
+    sprite.name = `step-sprite-${numberText}`;
+    sprite.userData = { stepIndex: parseInt(numberText, 10) };
+    const scaleSize = isSelected ? 12 : 9.5;
+    sprite.scale.set(scaleSize, scaleSize, 1);
+    sprite.renderOrder = 999; // Draw over other transparent or mesh items
+    parent.add(sprite);
+  }
+
   // Fit Camera to Wire bounding box (Framing)
   const handleFitCamera = () => {
+    if (isCameraLocked) return;
     const wireGroup = wireGroupRef.current;
     const camera = cameraRef.current;
     const controls = controlsRef.current;
@@ -319,8 +541,44 @@ export default function ThreeVisualizer({
     cameraZ *= 1.4; // Add generous margin padding
 
     // Position camera at a nice elevated isometric angle
-    const direction = new THREE.Vector3(1.1, 0.8, 1.4).normalize();
+    const direction = cameraDirection
+      ? new THREE.Vector3(cameraDirection.x, cameraDirection.y, cameraDirection.z).normalize()
+      : new THREE.Vector3(1.1, 0.8, 1.4).normalize();
     const newPos = center.clone().addScaledVector(direction, cameraZ);
+
+    camera.position.copy(newPos);
+    camera.up.set(0, 1, 0);
+    controls.target.copy(center);
+    controls.update();
+  };
+
+  // Set camera to look from Visão G (perfect isometric perspective matching PDF region G)
+  const handleVisaoG = () => {
+    if (isCameraLocked) return;
+    const wireGroup = wireGroupRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    // Calculate bounding box of the wire to center on it
+    const box = new THREE.Box3().setFromObject(wireGroup || new THREE.Group());
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    if (!box.isEmpty()) {
+      box.getCenter(center);
+      box.getSize(size);
+    } else {
+      center.set(10, 10, 20);
+      size.set(40, 40, 60);
+    }
+
+    const maxDim = Math.max(size.x, size.y, size.z, 30);
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraDistance = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.55;
+
+    // Direction vector pointing to align with the PDF G perspective
+    const direction = new THREE.Vector3(-1.45, 1.15, -1.25).normalize();
+    const newPos = center.clone().addScaledVector(direction, cameraDistance);
 
     camera.position.copy(newPos);
     camera.up.set(0, 1, 0);
@@ -330,6 +588,7 @@ export default function ThreeVisualizer({
 
   // Reset Camera View to focus directly on the Nozzle/Bocal (0,0,0) matching technical drawing view
   const handleResetCamera = () => {
+    if (isCameraLocked) return;
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.set(60, 45, 80);
       cameraRef.current.up.set(0, 1, 0);
@@ -338,16 +597,163 @@ export default function ThreeVisualizer({
     }
   };
 
+  // Raycaster click handler with drag prevention
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+
+    let startX = 0;
+    let startY = 0;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      startX = event.clientX;
+      startY = event.clientY;
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const diffX = Math.abs(event.clientX - startX);
+      const diffY = Math.abs(event.clientY - startY);
+      
+      // If pointer moved more than 6 pixels, it is a drag, not a click
+      if (diffX > 6 || diffY > 6) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.params.Sprite = { threshold: 5 };
+      raycaster.params.Line = { threshold: 3.5 };
+      
+      if (cameraRef.current && wireGroupRef.current) {
+        raycaster.setFromCamera(mouse, cameraRef.current);
+        const intersects = raycaster.intersectObjects(wireGroupRef.current.children, true);
+        
+        const hit = intersects.find(
+          (intersect) =>
+            intersect.object.userData &&
+            typeof intersect.object.userData.stepIndex === 'number'
+        );
+        
+        if (hit) {
+          const stepIdx = hit.object.userData.stepIndex;
+          onSelectStep(stepIdx);
+        }
+      }
+    };
+
+    const canvasElement = renderer.domElement;
+    canvasElement.addEventListener('pointerdown', handlePointerDown);
+    canvasElement.addEventListener('pointerup', handlePointerUp);
+    
+    return () => {
+      canvasElement.removeEventListener('pointerdown', handlePointerDown);
+      canvasElement.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [onSelectStep, steps]);
+
+  // Helper to adjust the sign of AP or AC of the selected step
+  const handleAdjustSign = (field: 'ap' | 'ac', direction: 'positive' | 'negative') => {
+    if (selectedStepIndex === null || !onStepsChange) return;
+    
+    const stepIndexInArray = selectedStepIndex - 1;
+    const currentStep = steps[stepIndexInArray];
+    if (!currentStep) return;
+
+    let value = currentStep[field];
+    
+    // If the value is null or 0, we can give it a default value
+    if (value === null || value === 0) {
+      value = 90; // Default angle magnitude
+    }
+
+    const magnitude = Math.abs(value);
+    const newValue = direction === 'positive' ? magnitude : -magnitude;
+
+    // Update parent state
+    const updatedSteps = steps.map((s, idx) => {
+      if (idx === stepIndexInArray) {
+        return {
+          ...s,
+          [field]: newValue,
+        };
+      }
+      return s;
+    });
+
+    onStepsChange(updatedSteps);
+  };
+
+  // Helper to rotate AP by some degrees
+  const handleRotateAP = (degrees: number) => {
+    if (selectedStepIndex === null || !onStepsChange) return;
+
+    const stepIndexInArray = selectedStepIndex - 1;
+    const currentStep = steps[stepIndexInArray];
+    if (!currentStep) return;
+
+    let currentAp = currentStep.ap ?? 0;
+    let newAp = currentAp + degrees;
+
+    // Normalize newAp between -180 and 180
+    if (newAp > 180) newAp -= 360;
+    if (newAp < -180) newAp += 360;
+
+    const updatedSteps = steps.map((s, idx) => {
+      if (idx === stepIndexInArray) {
+        return {
+          ...s,
+          ap: newAp,
+        };
+      }
+      return s;
+    });
+
+    onStepsChange(updatedSteps);
+  };
+
+  // Helper to invert positive/negative sign
+  const handleInvertSign = (field: 'ap' | 'ac') => {
+    if (selectedStepIndex === null || !onStepsChange) return;
+
+    const stepIndexInArray = selectedStepIndex - 1;
+    const currentStep = steps[stepIndexInArray];
+    if (!currentStep) return;
+
+    const currentValue = currentStep[field] ?? 0;
+    const newValue = -currentValue;
+
+    const updatedSteps = steps.map((s, idx) => {
+      if (idx === stepIndexInArray) {
+        return {
+          ...s,
+          [field]: newValue,
+        };
+      }
+      return s;
+    });
+
+    onStepsChange(updatedSteps);
+  };
+
+  const lastProcessedCameraTsRef = useRef<number | null>(null);
+
   // Listen for parent camera action requests (fit/reset)
   useEffect(() => {
-    if (!cameraActionTrigger) return;
+    if (!cameraActionTrigger || isCameraLocked) return;
+    if (lastProcessedCameraTsRef.current === cameraActionTrigger.ts) return;
+
+    lastProcessedCameraTsRef.current = cameraActionTrigger.ts;
+
     if (cameraActionTrigger.action === 'fit') {
       // Delay slightly to ensure geometry is fully populated/rendered in 3D scene first
       setTimeout(handleFitCamera, 50);
     } else if (cameraActionTrigger.action === 'reset') {
       handleResetCamera();
     }
-  }, [cameraActionTrigger]);
+  }, [cameraActionTrigger, isCameraLocked]);
 
   // Handle toggling axis helper lines and sprites when HUD visibility changes
   useEffect(() => {
@@ -356,6 +762,34 @@ export default function ThreeVisualizer({
       axesGroup.visible = showHud;
     }
   }, [showHud]);
+
+  // Handle toggling machine parts (nozzle, backing, pins) visibility
+  useEffect(() => {
+    if (nozzleGroupRef.current) {
+      nozzleGroupRef.current.visible = showMachine;
+    }
+  }, [showMachine]);
+
+  // Handle toggling horizontal floor grid visibility
+  useEffect(() => {
+    if (gridFloorRef.current) {
+      gridFloorRef.current.visible = showFloorGrid;
+    }
+  }, [showFloorGrid]);
+
+  // Handle toggling vertical wall grid visibility
+  useEffect(() => {
+    if (gridVerticalRef.current) {
+      gridVerticalRef.current.visible = showVerticalGrid;
+    }
+  }, [showVerticalGrid]);
+
+  // Handle toggling side wall grid (Grade W) visibility
+  useEffect(() => {
+    if (gridWRef.current) {
+      gridWRef.current.visible = showWGrid;
+    }
+  }, [showWGrid]);
 
   // Re-render wire whenever steps, rotationMode, wireDiameter, hovered/selected steps, or animation changes
   useEffect(() => {
@@ -402,7 +836,7 @@ export default function ThreeVisualizer({
     let activeIndex = steps.length;
     let progressVal = 1.0;
 
-    if (isAnimating || selectedStepIndex !== null) {
+    if (!isFrozen && (isAnimating || selectedStepIndex !== null)) {
       isSubset = true;
       const maxStep = steps.length;
 
@@ -441,7 +875,7 @@ export default function ThreeVisualizer({
     if (smoothPoints.length < 2) return;
 
     // Build the wire by steps
-    const maxStepToDraw = activeIndex;
+    const maxStepToDraw = isFrozen ? steps.length : activeIndex;
 
     for (let sIdx = 1; sIdx <= maxStepToDraw; sIdx++) {
       // Find points belonging to this step
@@ -459,26 +893,41 @@ export default function ThreeVisualizer({
         }
       }
 
-      if (stepPts.length < 2) continue;
+      // Filter out duplicate or near-identical points to prevent 0-length tangent vectors and mesh distortion
+      const cleanStepPts: THREE.Vector3[] = [];
+      for (const pt of stepPts) {
+        if (cleanStepPts.length === 0 || cleanStepPts[cleanStepPts.length - 1].distanceTo(pt) > 0.05) {
+          cleanStepPts.push(pt);
+        }
+      }
 
-      // Resample the points to ensure high density and even spacing, which prevents CatmullRomCurve3 from overshooting or bulging at the transition between straight parts and bends
-      const resampledPts = resamplePoints(stepPts, 1.0);
-      const curve = new THREE.CatmullRomCurve3(resampledPts, false, 'centripetal');
+      if (cleanStepPts.length < 2) continue;
+
+      let curve: THREE.Curve<THREE.Vector3>;
+      if (cleanStepPts.length === 2) {
+        curve = new THREE.LineCurve3(cleanStepPts[0], cleanStepPts[1]);
+      } else {
+        curve = new THREE.CatmullRomCurve3(cleanStepPts, false, 'centripetal', 0.05);
+      }
       
+      const isHovered = hoveredStepIndex === sIdx;
+      const isSelected = selectedStepIndex === sIdx;
+
       // Tube parameters: curve, tubularSegments, radius, radialSegments, closed
-      const radius = wireDiameter / 2;
+      const radius = (isFrozen && (isHovered || isSelected))
+        ? (wireDiameter / 2) * 1.4
+        : (wireDiameter / 2);
+
       const tubeGeometry = new THREE.TubeGeometry(
         curve,
-        Math.max(64, resampledPts.length), // Subdivisions proportional to resampled point density for a flawless circular bend shape
+        Math.max(24, cleanStepPts.length * 6), // Subdivisions proportional to the exact smooth points
         radius,
-        16, // Smoother cylinder
+        14, // Smoother cylinder radial segments
         false
       );
 
       // Determine material color
       const colorHex = stepColors[(sIdx - 1) % stepColors.length];
-      const isHovered = hoveredStepIndex === sIdx;
-      const isSelected = selectedStepIndex === sIdx;
 
       let material: THREE.Material;
       if (isHovered || isSelected) {
@@ -589,6 +1038,15 @@ export default function ThreeVisualizer({
         const labelPos = frame.position.clone().addScaledVector(frame.up, length + 2);
         createAxisLabel(wireGroup, `P${sIdx}`, labelPos, '#ffffff');
       }
+
+      // Draw permanent highly legible sequence numbers for each step (1, 2, 3...)
+      if (showHud) {
+        // Place the number badge offset from the wire axis to be beautifully clean
+        const offsetDirection = frame.up.clone().add(frame.right).normalize();
+        const numPos = frame.position.clone().addScaledVector(offsetDirection, 8.0);
+        const colHex = stepColors[(sIdx - 1) % stepColors.length];
+        createStepNumberLabel(wireGroup, String(sIdx), numPos, isSelected, colHex);
+      }
     });
 
     // Animate nozzle bending pin rotation
@@ -611,39 +1069,316 @@ export default function ThreeVisualizer({
 
     // Camera targeting on select removed to preserve user's manual perspective, zoom, and pan controls
 
-  }, [steps, rotationMode, wireDiameter, hoveredStepIndex, selectedStepIndex, animationProgress, isAnimating, alignmentMode, showHud]);
+  }, [steps, rotationMode, wireDiameter, hoveredStepIndex, selectedStepIndex, animationProgress, isAnimating, alignmentMode, showHud, isFrozen]);
+
+  useEffect(() => {
+    if (controlsRef.current && cameraRef.current) {
+      controlsRef.current.enabled = !isCameraLocked;
+      if (!isCameraLocked) {
+        // Force update trackball controls state to current camera pose so unlocking view maintains exact position with 0 jump
+        controlsRef.current.update();
+      }
+    }
+  }, [isCameraLocked]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative" id="three-container">
       {/* ThreeJS mount element */}
       <div ref={mountRef} className="w-full h-full" id="three-canvas-mount" />
 
-      {/* Floating UI HUD elements */}
+      {/* Top Right Camera View Presets & Lock Bar (FOTO 1 REQUIREMENT) */}
       {showHud && (
+        <div className="absolute top-4 right-4 flex flex-wrap items-center gap-1 bg-[#121418]/90 border border-[#2D3748] rounded-xl p-1 shadow-2xl backdrop-blur-md pointer-events-auto z-40" id="three-hud-top-right-views">
+          <span className="text-[9px] font-mono font-bold text-slate-400 px-2 uppercase tracking-wider hidden sm:inline">
+            Vistas 90°:
+          </span>
+          <button
+            onClick={() => handlePresetView('top')}
+            className="bg-[#1A202C] hover:bg-blue-600/30 text-slate-200 hover:text-white border border-[#2D3748] hover:border-blue-500/50 rounded-lg px-2 py-1 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Vista Superior a 90° da Grade"
+            id="btn-view-top"
+          >
+            Superior
+          </button>
+          <button
+            onClick={() => handlePresetView('bottom')}
+            className="bg-[#1A202C] hover:bg-blue-600/30 text-slate-200 hover:text-white border border-[#2D3748] hover:border-blue-500/50 rounded-lg px-2 py-1 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Vista Inferior a 90° da Grade"
+            id="btn-view-bottom"
+          >
+            Inferior
+          </button>
+          <button
+            onClick={() => handlePresetView('left')}
+            className="bg-[#1A202C] hover:bg-blue-600/30 text-slate-200 hover:text-white border border-[#2D3748] hover:border-blue-500/50 rounded-lg px-2 py-1 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Vista Lateral Esquerda a 90° da Grade"
+            id="btn-view-left"
+          >
+            Esquerda
+          </button>
+          <button
+            onClick={() => handlePresetView('right')}
+            className="bg-[#1A202C] hover:bg-blue-600/30 text-slate-200 hover:text-white border border-[#2D3748] hover:border-blue-500/50 rounded-lg px-2 py-1 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Vista Lateral Direita a 90° da Grade"
+            id="btn-view-right"
+          >
+            Direita
+          </button>
+          <button
+            onClick={() => handlePresetView('front')}
+            className="bg-[#1A202C] hover:bg-blue-600/30 text-slate-200 hover:text-white border border-[#2D3748] hover:border-blue-500/50 rounded-lg px-2 py-1 text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95"
+            title="Vista Frontal a 90° da Grade"
+            id="btn-view-front"
+          >
+            Frontal
+          </button>
+
+          {/* TRAVAR VISTA BUTTON */}
+          <button
+            onClick={() => setIsCameraLocked(!isCameraLocked)}
+            className={`ml-1 px-2.5 py-1 text-[10px] font-bold rounded-lg border flex items-center gap-1 transition-all cursor-pointer shadow-md active:scale-95 ${
+              isCameraLocked
+                ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 shadow-[0_0_10px_rgba(217,119,6,0.4)]'
+                : 'bg-[#1A202C] hover:bg-[#2D3748] text-slate-300 border-[#2D3748]'
+            }`}
+            title={
+              isCameraLocked
+                ? 'Câmera Trava Ativa! Alterações na tabela não irão mover a câmera.'
+                : 'Travar a vista atual para que edições na tabela não reposicionem a câmera'
+            }
+            id="btn-toggle-camera-lock"
+          >
+            <svg className="w-3 h-3 text-current" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              {isCameraLocked ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              )}
+            </svg>
+            <span>{isCameraLocked ? 'Vista Travada 🔒' : 'Travar Vista'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Floating UI HUD elements */}
+      {showHud && activeModelName && (
         <div className="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none" id="three-hud-top-left">
-          <div className="bg-[#171923]/95 border border-[#2D3748] rounded-lg p-3 text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-auto max-w-[260px]">
-            <h4 className="font-semibold text-slate-100 mb-1 flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-              Ponto de Partida (Bocal)
-            </h4>
-            <p className="text-[10px] text-slate-400 mb-2 leading-relaxed">
-              O bocal da máquina está fixado na origem <b className="text-slate-200">(0,0,0)</b>. O fio é projetado no eixo Z para frente.
-            </p>
-            <div className="flex flex-col gap-1 text-[11px] font-mono">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-1 bg-red-500 rounded" />
-                <span>Eixo X: Horizontal</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-1 bg-green-500 rounded" />
-                <span>Eixo Y: Vertical</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-1 bg-blue-500 rounded" />
-                <span>Eixo Z: Direção de Alimentação</span>
-              </div>
+          <div className="bg-[#171923]/90 border border-blue-500/30 rounded-xl p-3 text-xs text-slate-300 backdrop-blur-md shadow-lg pointer-events-auto flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+            <div>
+              <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono block">Modelo Ativo:</span>
+              <span className="font-bold text-slate-100 font-mono text-[11px]">{activeModelName}</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 3D Direction Cross Adjustment Pad (floating overlay) */}
+      {selectedStepIndex !== null && onStepsChange && showHud && (
+        <div 
+          className="absolute bottom-4 left-4 bg-[#121418]/95 hover:bg-[#121418] border border-[#2D3748] rounded-2xl p-4 shadow-2xl backdrop-blur-md w-72 pointer-events-auto transition-all select-none z-50 touch-none"
+          id="direction-adjuster-pad"
+          style={{ 
+            transform: `translate3d(${padPosition.x}px, ${padPosition.y}px, 0) scale(${padScale})`,
+            transformOrigin: 'bottom left',
+            animation: 'scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
+          {/* Header (Acts as drag handle) */}
+          <div 
+            onPointerDown={handlePadPointerDown}
+            onPointerMove={handlePadPointerMove}
+            onPointerUp={handlePadPointerUp}
+            className="flex items-center justify-between border-b border-[#2D3748] pb-2 mb-2.5 cursor-grab active:cursor-grabbing select-none touch-none"
+            title="Arraste pelo cabeçalho para mover"
+          >
+            <div className="flex items-center gap-1.5 pointer-events-none">
+              <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+              <span className="text-xs font-bold text-slate-100 font-sans">
+                Ajuste (Passo {selectedStepIndex})
+              </span>
+            </div>
+            
+            {/* Control Group: Scale and Close */}
+            <div className="flex items-center gap-2">
+              {/* Scale Adjuster (Diminuir/Aumentar) */}
+              <div className="flex items-center gap-1 bg-[#1A202C] border border-[#2D3748] rounded-lg px-1.5 py-0.5 text-[9px] font-mono text-slate-300">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPadScale(prev => Math.max(0.6, prev - 0.1));
+                  }}
+                  className="hover:text-amber-400 font-bold px-1 rounded hover:bg-[#2D3748] cursor-pointer"
+                  title="Diminuir tamanho (-10%)"
+                >
+                  -
+                </button>
+                <span className="min-w-[30px] text-center select-none">{Math.round(padScale * 100)}%</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPadScale(prev => Math.min(1.5, prev + 0.1));
+                  }}
+                  className="hover:text-amber-400 font-bold px-1 rounded hover:bg-[#2D3748] cursor-pointer"
+                  title="Aumentar tamanho (+10%)"
+                >
+                  +
+                </button>
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectStep(null);
+                }}
+                className="text-slate-400 hover:text-white text-xs p-1 rounded-lg hover:bg-[#2D3748] transition-colors cursor-pointer"
+                title="Fechar Ajustador"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Current Step Value Summary */}
+          <div className="bg-[#0F1115] border border-[#2D3748]/50 p-2 rounded-lg mb-3 text-[10px] font-mono text-slate-400 flex justify-between items-center">
+            <div>
+              Torção AP: <b className="text-purple-400">{(steps[selectedStepIndex - 1]?.ap ?? 0)}°</b>
+            </div>
+            <div>
+              Dobra AC: <b className="text-orange-400">{(steps[selectedStepIndex - 1]?.ac ?? 0)}°</b>
+            </div>
+          </div>
+
+          {/* D-Pad Circular Cross controls */}
+          <div className="flex flex-col items-center justify-center relative my-2">
+            {/* Label for UP: AC Positiva */}
+            <span className="text-[9px] text-[#A0AEC0] font-sans font-bold uppercase tracking-wider mb-1">
+              Dobra AC (+)
+            </span>
+
+            <div className="relative w-36 h-36 flex items-center justify-center bg-[#0d0f13] rounded-full border border-[#2D3748]/40 shadow-inner">
+              {/* Internal Cross Grid lines */}
+              <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-[#2D3748]/40 pointer-events-none transform -translate-x-1/2" />
+              <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-[#2D3748]/40 pointer-events-none transform -translate-y-1/2" />
+
+              {/* UP Arrow button: Sets AC to Positive */}
+              <button
+                onClick={() => handleAdjustSign('ac', 'positive')}
+                className="absolute top-1 left-1/2 -translate-x-1/2 w-9 h-9 bg-[#1A202C] hover:bg-emerald-950/40 text-white border border-[#2D3748] hover:border-emerald-500 rounded-xl flex items-center justify-center cursor-pointer transition-all shadow-md group"
+                title="Definir Dobra (AC) como POSITIVA"
+              >
+                <svg className="w-4 h-4 text-emerald-400 group-hover:text-emerald-300 transform group-hover:-translate-y-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+
+              {/* LEFT Arrow button: Sets AP to Negative */}
+              <button
+                onClick={() => handleAdjustSign('ap', 'negative')}
+                className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 bg-[#1A202C] hover:bg-purple-950/40 text-white border border-[#2D3748] hover:border-purple-500 rounded-xl flex items-center justify-center cursor-pointer transition-all shadow-md group"
+                title="Definir Torção (AP) como NEGATIVA"
+              >
+                <svg className="w-4 h-4 text-purple-400 group-hover:text-purple-300 transform group-hover:-translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+
+              {/* RIGHT Arrow button: Sets AP to Positive */}
+              <button
+                onClick={() => handleAdjustSign('ap', 'positive')}
+                className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 bg-[#1A202C] hover:bg-purple-950/40 text-white border border-[#2D3748] hover:border-purple-500 rounded-xl flex items-center justify-center cursor-pointer transition-all shadow-md group"
+                title="Definir Torção (AP) como POSITIVA"
+              >
+                <svg className="w-4 h-4 text-purple-400 group-hover:text-purple-300 transform group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* DOWN Arrow button: Sets AC to Negative */}
+              <button
+                onClick={() => handleAdjustSign('ac', 'negative')}
+                className="absolute bottom-1 left-1/2 -translate-x-1/2 w-9 h-9 bg-[#1A202C] hover:bg-emerald-950/40 text-white border border-[#2D3748] hover:border-indigo-500 rounded-xl flex items-center justify-center cursor-pointer transition-all shadow-md group"
+                title="Definir Dobra (AC) como NEGATIVA"
+              >
+                <svg className="w-4 h-4 text-indigo-400 group-hover:text-indigo-300 transform group-hover:translate-y-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* D-Pad center status circle */}
+              <div className="w-10 h-10 bg-[#121418] border-2 border-dashed border-[#2D3748] rounded-full flex flex-col items-center justify-center shadow-inner text-[8px] font-bold text-slate-500 font-mono">
+                <span>AP/AC</span>
+                <span className="text-amber-500 animate-pulse text-[9px] font-sans">+/-</span>
+              </div>
+            </div>
+
+            {/* Label for DOWN: AC Negativa */}
+            <span className="text-[9px] text-[#A0AEC0] font-sans font-bold uppercase tracking-wider mt-1">
+              Dobra AC (-)
+            </span>
+
+            {/* Side Labels */}
+            <div className="absolute left-0.5 top-1/2 -translate-y-1/2 -translate-x-3 text-[8px] text-[#A0AEC0] font-sans font-bold uppercase tracking-wider rotate-90 origin-center pointer-events-none">
+              AP (-)
+            </div>
+            <div className="absolute right-0.5 top-1/2 -translate-y-1/2 translate-x-3 text-[8px] text-[#A0AEC0] font-sans font-bold uppercase tracking-wider -rotate-90 origin-center pointer-events-none">
+              AP (+)
+            </div>
+          </div>
+
+          {/* Quick Shortcuts Buttons block */}
+          <div className="grid grid-cols-2 gap-1.5 mt-3 pt-2.5 border-t border-[#2D3748]">
+            <button
+              onClick={() => handleRotateAP(90)}
+              className="bg-[#1A202C] hover:bg-[#2D3748] text-[9px] text-slate-300 py-1 px-2 rounded-lg border border-[#2D3748] flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer font-sans"
+              title="Girar o plano de torção (AP) +90°"
+            >
+              <svg className="w-2.5 h-2.5 text-purple-400 animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 6H16" />
+              </svg>
+              <span>Girar AP +90°</span>
+            </button>
+
+            <button
+              onClick={() => handleRotateAP(-90)}
+              className="bg-[#1A202C] hover:bg-[#2D3748] text-[9px] text-slate-300 py-1 px-2 rounded-lg border border-[#2D3748] flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer font-sans"
+              title="Girar o plano de torção (AP) -90°"
+            >
+              <svg className="w-2.5 h-2.5 text-purple-400 transform scale-x-[-1]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 6H16" />
+              </svg>
+              <span>Girar AP -90°</span>
+            </button>
+
+            <button
+              onClick={() => handleInvertSign('ap')}
+              className="bg-[#1A202C] hover:bg-[#2D3748] text-[9px] text-slate-300 py-1 px-2 rounded-lg border border-[#2D3748] flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer font-sans"
+              title="Inverter o sinal positivo/negativo da torção (AP)"
+            >
+              <svg className="w-2.5 h-2.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              <span>Inverter AP (+/-)</span>
+            </button>
+
+            <button
+              onClick={() => handleInvertSign('ac')}
+              className="bg-[#1A202C] hover:bg-[#2D3748] text-[9px] text-slate-300 py-1 px-2 rounded-lg border border-[#2D3748] flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer font-sans"
+              title="Inverter o sinal positivo/negativo da dobra (AC)"
+            >
+              <svg className="w-2.5 h-2.5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              <span>Inverter AC (+/-)</span>
+            </button>
+          </div>
+
+          {/* Mini Help Caption */}
+          <p className="text-[8px] text-[#718096] text-center mt-2.5 leading-relaxed">
+            Pressione as setas para alinhar o sinal (+ ou -) de AP e AC em tempo real no desenho.
+          </p>
         </div>
       )}
 
@@ -700,16 +1435,108 @@ export default function ThreeVisualizer({
           </svg>
           Focar Bocal
         </button>
+
+        {/* Toggle Horizontal Grid (Piso) */}
+        <button
+          onClick={() => setShowFloorGrid(!showFloorGrid)}
+          className={`py-1.5 px-3 text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md rounded-lg border ${
+            showFloorGrid
+              ? "bg-cyan-950/90 text-cyan-200 border-cyan-500/50 shadow-[0_0_8px_rgba(6,182,212,0.3)]"
+              : "bg-[#171923]/95 hover:bg-[#2D3748]/90 text-slate-400 border-[#2D3748]"
+          }`}
+          title={showFloorGrid ? "Desligar Grade Horizontal (Piso)" : "Ligar Grade Horizontal (Piso)"}
+          id="btn-toggle-floor-grid"
+        >
+          <svg className="w-3.5 h-3.5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+          </svg>
+          <span>Grade H {showFloorGrid ? 'ON' : 'OFF'}</span>
+        </button>
+
+        {/* Toggle Vertical Grid (Parede Frontal) */}
+        <button
+          onClick={() => setShowVerticalGrid(!showVerticalGrid)}
+          className={`py-1.5 px-3 text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md rounded-lg border ${
+            showVerticalGrid
+              ? "bg-purple-950/90 text-purple-200 border-purple-500/50 shadow-[0_0_8px_rgba(168,85,247,0.3)]"
+              : "bg-[#171923]/95 hover:bg-[#2D3748]/90 text-slate-400 border-[#2D3748]"
+          }`}
+          title={showVerticalGrid ? "Desligar Grade Vertical (Parede)" : "Ligar Grade Vertical (Parede)"}
+          id="btn-toggle-vertical-grid"
+        >
+          <svg className="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 4v16M10 4v16M14 4v16M18 4v16" />
+          </svg>
+          <span>Grade V {showVerticalGrid ? 'ON' : 'OFF'}</span>
+        </button>
+
+        {/* Toggle Side Grid (Grade W) */}
+        <button
+          onClick={() => setShowWGrid(!showWGrid)}
+          className={`py-1.5 px-3 text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md rounded-lg border ${
+            showWGrid
+              ? "bg-emerald-950/90 text-emerald-200 border-emerald-500/50 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+              : "bg-[#171923]/95 hover:bg-[#2D3748]/90 text-slate-400 border-[#2D3748]"
+          }`}
+          title={showWGrid ? "Desligar Grade W (Parede Lateral)" : "Ligar Grade W (Parede Lateral)"}
+          id="btn-toggle-w-grid"
+        >
+          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+          </svg>
+          <span>Grade W {showWGrid ? 'ON' : 'OFF'}</span>
+        </button>
+
+        {/* Toggle Machine/Nozzle parts (Only show the rod/haste) */}
+        <button
+          onClick={() => setShowMachine(!showMachine)}
+          className="bg-[#171923]/95 hover:bg-[#2D3748]/90 text-slate-200 border border-[#2D3748] rounded-lg py-1.5 px-3 text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md"
+          title={showMachine ? "Ocultar bocal e pinos da máquina (Deixar apenas a haste)" : "Mostrar bocal e pinos da máquina"}
+          id="btn-toggle-machine-parts"
+        >
+          {showMachine ? (
+            <>
+              {/* Eye-off style icon or wire-only icon */}
+              <svg className="w-3.5 h-3.5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+              </svg>
+              Ocultar Bocal (Apenas Haste)
+            </>
+          ) : (
+            <>
+              {/* Eye icon to show machine back */}
+              <svg className="w-3.5 h-3.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268-2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Mostrar Bocal
+            </>
+          )}
+        </button>
+
+        {/* Freeze Mode button requested by user */}
+        <button
+          onClick={() => setIsFrozen && setIsFrozen(!isFrozen)}
+          className={`py-1.5 px-3 text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md rounded-lg border ${
+            isFrozen
+              ? "bg-blue-600 hover:bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(37,99,235,0.4)]"
+              : "bg-[#171923]/95 hover:bg-[#2D3748]/90 text-slate-200 border-[#2D3748]"
+          }`}
+          title={isFrozen ? "Clique para Descongelar (Voltar à visualização por etapas)" : "Clique para Congelar (Exibir haste completa e destacar etapa atual)"}
+          id="btn-toggle-freeze"
+        >
+          <svg className={`w-3.5 h-3.5 ${isFrozen ? "text-white animate-pulse" : "text-blue-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            {isFrozen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            )}
+          </svg>
+          {isFrozen ? "Congelado ❄️" : "Congelar"}
+        </button>
       </div>
 
-      {/* Touch instruction overlays */}
-      {showHud && (
-        <div className="absolute top-4 right-4 bg-[#171923]/40 border border-[#2D3748] rounded-lg p-2 text-[10px] text-slate-400 backdrop-blur-sm pointer-events-none select-none max-w-[150px] leading-snug">
-          <p>🖱️ Botão esquerdo: Girar</p>
-          <p>🖱️ Roda scroll: Zoom</p>
-          <p>🖱️ Botão direito: Mover</p>
-        </div>
-      )}
+      {/* Touch instruction overlays removed to save space */}
     </div>
   );
 }

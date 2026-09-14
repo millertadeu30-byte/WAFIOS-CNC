@@ -7,6 +7,7 @@ export interface BenderStep {
   id: string;
   n: number;            // Row number (1-based)
   l: number;            // Length of feed (L) in mm
+  w: number | null;     // Grade W / Eixo W parameter (mm or degrees)
   esp: number | null;   // Esp parameter (additional feed spacing/parameters)
   ap: number | null;    // Rotation angle (AP) in degrees, null means blank
   apCorr: number | null;// AP correction (+/-)
@@ -24,4 +25,5 @@ export interface PieceTemplate {
   rotationMode: RotationMode;
   wireDiameter: number;
   steps: BenderStep[];
+  cameraDirection?: { x: number; y: number; z: number } | null;
 }
