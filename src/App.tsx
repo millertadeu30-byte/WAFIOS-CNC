@@ -25,6 +25,8 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Square,
   Maximize2,
   Minimize2,
@@ -343,6 +345,19 @@ export default function App() {
 
   // Maximized Graph state
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
+
+  // Minimized state for "Análise de Produção Estimada" panel
+  const [isStatsMinimized, setIsStatsMinimized] = useState<boolean>(() => {
+    return localStorage.getItem('wafios_stats_minimized') === 'true';
+  });
+
+  const toggleStatsMinimized = () => {
+    setIsStatsMinimized((prev) => {
+      const next = !prev;
+      localStorage.setItem('wafios_stats_minimized', next.toString());
+      return next;
+    });
+  };
 
   // Resizable layout state (Table vs 3D Visualizer window size)
   const [leftPanelRatio, setLeftPanelRatio] = useState<number>(() => {
@@ -1914,8 +1929,8 @@ export default function App() {
           
           {/* 3D Graphics Canvas Box */}
           <div 
-            className="bg-[#090B0E] border border-[#2D3748] rounded-2xl overflow-hidden shadow-md flex flex-col sticky top-6 relative" 
-            style={{ height: `${panelHeight}px` }}
+            className="bg-[#090B0E] border border-[#2D3748] rounded-2xl overflow-hidden shadow-md flex flex-col sticky top-6 relative transition-[height] duration-300 ease-in-out" 
+            style={{ height: isStatsMinimized ? `${panelHeight + 175}px` : `${panelHeight}px` }}
             id="visualizer-card"
           >
             {/* 3D header */}
@@ -2157,51 +2172,92 @@ export default function App() {
           </div>
 
           {/* Manufacturing Planning Statistics Dashboard card */}
-          <div className="bg-[#121418] border border-[#2D3748] rounded-2xl p-5 shadow-md space-y-4" id="stats-card">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#A0AEC0] font-mono flex items-center gap-1.5">
-              <Activity className="w-4 h-4 text-emerald-500" />
-              Análise de Produção Estimada
-            </h3>
+          <div className={`bg-[#121418] border border-[#2D3748] rounded-2xl transition-all duration-300 shadow-md ${isStatsMinimized ? 'p-3.5' : 'p-5 space-y-4'}`} id="stats-card">
+            <div 
+              className="flex items-center justify-between cursor-pointer select-none"
+              onClick={toggleStatsMinimized}
+            >
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#A0AEC0] font-mono flex items-center gap-1.5 shrink-0">
+                  <Activity className="w-4 h-4 text-emerald-500" />
+                  <span>Análise de Produção Estimada</span>
+                </h3>
 
-            <div className="grid grid-cols-2 gap-4 text-xs font-sans" id="stats-grid">
-              {/* Stat 1: Total Length */}
-              <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-length">
-                <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Fio Necessário</span>
-                <span className="text-lg font-bold text-white font-mono">
-                  {totalLength.toFixed(1)} mm
-                </span>
-                <span className="text-[10px] text-[#718096] block mt-1">({(totalLength / 1000).toFixed(3)} metros por peça)</span>
+                {/* Compact summary pill shown when minimized so no information is lost */}
+                {isStatsMinimized && (
+                  <div className="text-[11px] text-slate-400 font-sans flex items-center gap-2 border-l border-[#2D3748] pl-2.5 ml-1 flex-wrap">
+                    <span>Fio: <b className="text-white font-mono">{totalLength.toFixed(1)}mm</b></span>
+                    <span className="text-[#2D3748]">•</span>
+                    <span>Peso: <b className="text-white font-mono">{pieceWeightGrams.toFixed(2)}g</b></span>
+                    <span className="text-[#2D3748]">•</span>
+                    <span>Dobras: <b className="text-white font-mono">{totalBends}</b></span>
+                    <span className="text-[#2D3748]">•</span>
+                    <span>Ciclo: <b className="text-emerald-400 font-mono">{estimatedCycleTimeSec.toFixed(1)}s</b></span>
+                  </div>
+                )}
               </div>
 
-              {/* Stat 2: Total Weight */}
-              <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-weight">
-                <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Peso da Peça</span>
-                <span className="text-lg font-bold text-white font-mono">
-                  {pieceWeightGrams.toFixed(2)} g
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleStatsMinimized();
+                }}
+                className="p-1.5 rounded-lg bg-[#1D222B] hover:bg-[#2A313D] border border-[#2D3748] text-slate-300 hover:text-white transition-all flex items-center gap-1.5 text-[11px] font-sans font-semibold cursor-pointer shrink-0 ml-2 shadow-sm"
+                title={isStatsMinimized ? "Expandir Análise de Produção" : "Minimizar para ampliar a tela do gráfico 3D"}
+                id="btn-toggle-stats-panel"
+              >
+                <span className="hidden sm:inline text-[10px] uppercase tracking-wider text-slate-400 font-mono">
+                  {isStatsMinimized ? 'Expandir Painel' : 'Minimizar Painel'}
                 </span>
-                <span className="text-[10px] text-[#718096] block mt-1">(Aço Inox, densidade ~7.85g/cm³)</span>
-              </div>
-
-              {/* Stat 3: Total bends */}
-              <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-bends">
-                <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Dobras (Pino)</span>
-                <span className="text-lg font-bold text-white font-mono">
-                  {totalBends} dobras
-                </span>
-                <span className="text-[10px] text-[#718096] block mt-1">({steps.length} segmentos totais)</span>
-              </div>
-
-              {/* Stat 4: Estimated Production cycle */}
-              <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-cycle">
-                <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Tempo de Ciclo (Est.)</span>
-                <span className="text-lg font-bold text-emerald-400 font-mono">
-                  {estimatedCycleTimeSec.toFixed(1)} segundos
-                </span>
-                <span className="text-[10px] text-[#718096] block mt-1">
-                  (~{Math.round(3600 / estimatedCycleTimeSec)} peças por hora)
-                </span>
-              </div>
+                {isStatsMinimized ? (
+                  <ChevronDown className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-slate-400" />
+                )}
+              </button>
             </div>
+
+            {!isStatsMinimized && (
+              <div className="grid grid-cols-2 gap-4 text-xs font-sans" id="stats-grid">
+                {/* Stat 1: Total Length */}
+                <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-length">
+                  <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Fio Necessário</span>
+                  <span className="text-lg font-bold text-white font-mono">
+                    {totalLength.toFixed(1)} mm
+                  </span>
+                  <span className="text-[10px] text-[#718096] block mt-1">({(totalLength / 1000).toFixed(3)} metros por peça)</span>
+                </div>
+
+                {/* Stat 2: Total Weight */}
+                <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-weight">
+                  <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Peso da Peça</span>
+                  <span className="text-lg font-bold text-white font-mono">
+                    {pieceWeightGrams.toFixed(2)} g
+                  </span>
+                  <span className="text-[10px] text-[#718096] block mt-1">(Aço Inox, densidade ~7.85g/cm³)</span>
+                </div>
+
+                {/* Stat 3: Total bends */}
+                <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-bends">
+                  <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Dobras (Pino)</span>
+                  <span className="text-lg font-bold text-white font-mono">
+                    {totalBends} dobras
+                  </span>
+                  <span className="text-[10px] text-[#718096] block mt-1">({steps.length} segmentos totais)</span>
+                </div>
+
+                {/* Stat 4: Estimated Production cycle */}
+                <div className="bg-[#1A202C] border border-[#2D3748]/60 rounded-xl p-3" id="stat-cycle">
+                  <span className="text-[#A0AEC0] text-[10px] uppercase font-mono tracking-wider block mb-1">Tempo de Ciclo (Est.)</span>
+                  <span className="text-lg font-bold text-emerald-400 font-mono">
+                    {estimatedCycleTimeSec.toFixed(1)} segundos
+                  </span>
+                  <span className="text-[10px] text-[#718096] block mt-1">
+                    (~{Math.round(3600 / estimatedCycleTimeSec)} peças por hora)
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
         </section>
