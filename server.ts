@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -109,8 +110,8 @@ function getLocalFallback(fileName: string = "", hasVideo: boolean = false) {
         "Conversão CNC WAFIOS: Ângulos internos de 129° e 156° do desenho calibrados para deflexão de dobra AC de 51° e 24°."
       ],
       steps: [
-        { n: 1, l: 15.50, esp: null, ap: 90.0,  apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 1 (90°)" },
-        { n: 2, l: 30.00, esp: null, ap: -90.0, apCorr: null, ac: -90.0, acCorr: null, r: 2.0, comment: "Dobra 2 (90°)" },
+        { n: 1, l: 15.50, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 1 (90°)" },
+        { n: 2, l: 30.00, esp: null, ap: 180.0, apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 2 (90°)" },
         { n: 3, l: 7.00,  esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 3 (90°)" },
         { n: 4, l: 23.00, esp: null, ap: 0.0,   apCorr: null, ac: -51.0, acCorr: null, r: 2.0, comment: "Dobra 4 (51° / 129° int)" },
         { n: 5, l: 25.00, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 5 (90°)" },
@@ -148,6 +149,59 @@ async function startServer() {
   // Accept larger payload sizes for base64 encoded technical drawing PDF/image files and video frame samples
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ limit: "100mb", extended: true }));
+
+  // Persistent Custom Templates Endpoint
+  const templatesFilePath = path.join(process.cwd(), "custom_templates.json");
+
+  const readCustomTemplates = (): any[] => {
+    try {
+      if (fs.existsSync(templatesFilePath)) {
+        const raw = fs.readFileSync(templatesFilePath, "utf-8");
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error("Erro ao ler custom_templates.json", e);
+    }
+    return [];
+  };
+
+  const writeCustomTemplates = (templates: any[]) => {
+    try {
+      fs.writeFileSync(templatesFilePath, JSON.stringify(templates, null, 2), "utf-8");
+    } catch (e) {
+      console.error("Erro ao escrever custom_templates.json", e);
+    }
+  };
+
+  app.get("/api/custom-templates", (req, res) => {
+    const list = readCustomTemplates();
+    res.json(list);
+  });
+
+  app.post("/api/custom-templates", (req, res) => {
+    const template = req.body;
+    if (!template || !template.name) {
+      return res.status(400).json({ error: "Gabarito inválido" });
+    }
+    const current = readCustomTemplates();
+    const key = template.name.toLowerCase().trim();
+    const existingIndex = current.findIndex((t: any) => t.name.toLowerCase().trim() === key);
+    if (existingIndex !== -1) {
+      current[existingIndex] = template;
+    } else {
+      current.push(template);
+    }
+    writeCustomTemplates(current);
+    res.json({ success: true, templates: current });
+  });
+
+  app.delete("/api/custom-templates/:name", (req, res) => {
+    const nameParam = decodeURIComponent(req.params.name).toLowerCase().trim();
+    const current = readCustomTemplates();
+    const updated = current.filter((t: any) => t.name.toLowerCase().trim() !== nameParam);
+    writeCustomTemplates(updated);
+    res.json({ success: true, templates: updated });
+  });
 
   // API Route: analyze-drawing using Gemini API (Supports Drawing PDF/Image + optional Video)
   app.post("/api/analyze-drawing", async (req, res) => {

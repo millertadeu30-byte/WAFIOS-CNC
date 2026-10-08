@@ -1,0 +1,19 @@
+{
+  "entities": {
+    "templates": {
+      "title": "Piece Templates / Gabaritos",
+      "description": "Gabaritos e coordenadas de peças de dobra CNC sincronizados em tempo real.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "rotationMode": { "type": "string" },
+        "wireDiameter": { "type": "number" },
+        "steps": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "steps"]
+    }
+  }
+}

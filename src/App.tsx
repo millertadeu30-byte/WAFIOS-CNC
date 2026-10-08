@@ -43,6 +43,11 @@ import { generateWireGeometry } from './utils/geometry';
 import { enforceTorsionAndCorteRules, getTorsionValidationErrors } from './utils/rules';
 import ProgramTable from './components/ProgramTable';
 import ThreeVisualizer from './components/ThreeVisualizer';
+import {
+  saveTemplateToFirestore,
+  deleteTemplateFromFirestore,
+  subscribeTemplatesFromFirestore,
+} from './lib/firebaseTemplates';
 import InstructionGuide from './components/InstructionGuide';
 import html2pdf from 'html2pdf.js';
 
@@ -55,8 +60,8 @@ const TEMPLATES: PieceTemplate[] = [
     wireDiameter: 2.0,
     cameraDirection: { x: -0.45, y: -0.35, z: 1.8 },
     steps: [
-      { id: '319-1', n: 1, l: 15.50, w: null, esp: null, ap: 90.0,  apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 1 (90°)' },
-      { id: '319-2', n: 2, l: 30.00, w: null, esp: null, ap: -90.0, apCorr: null, ac: -90.0, acCorr: null, r: 2.0, comment: 'Dobra 2 (90°)' },
+      { id: '319-1', n: 1, l: 15.50, w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 1 (90°)' },
+      { id: '319-2', n: 2, l: 30.00, w: null, esp: null, ap: 180.0, apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 2 (90°)' },
       { id: '319-3', n: 3, l: 7.00,  w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 3 (90°)' },
       { id: '319-4', n: 4, l: 23.00, w: null, esp: null, ap: 0.0,   apCorr: null, ac: -51.0, acCorr: null, r: 2.0, comment: 'Dobra 4 (51° / 129° int)' },
       { id: '319-5', n: 5, l: 25.00, w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 5 (90°)' },
@@ -173,6 +178,23 @@ const TEMPLATES: PieceTemplate[] = [
       { id: '323x-5', n: 5, l: 67.50,  w: null, esp: null, ap: 0.0,   apCorr: null, ac: null,  acCorr: null, r: 1.5, comment: 'Corte E' },
     ],
   },
+  {
+    name: 'Haste boia 23313',
+    description: 'Gabarito salvo a partir do simulador',
+    rotationMode: 'relative',
+    wireDiameter: 2.5,
+    cameraDirection: { x: -0.45, y: -0.35, z: 1.8 },
+    steps: [
+      { id: '313-1', n: 1, l: 15.50, w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 1 (90°)' },
+      { id: '313-2', n: 2, l: 30.00, w: null, esp: null, ap: 180.0, apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 2 (90°)' },
+      { id: '313-3', n: 3, l: 7.00,  w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 3 (90°)' },
+      { id: '313-4', n: 4, l: 23.00, w: null, esp: null, ap: 0.0,   apCorr: null, ac: -51.0, acCorr: null, r: 2.0, comment: 'Dobra 4 (51° / 129° int)' },
+      { id: '313-5', n: 5, l: 25.00, w: null, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 5 (90°)' },
+      { id: '313-6', n: 6, l: 86.00, w: null, esp: null, ap: 0.0,   apCorr: null, ac: -24.0, acCorr: null, r: 2.0, comment: 'Dobra 6 (24° / 156° int)' },
+      { id: '313-7', n: 7, l: 111.62,w: null, esp: null, ap: 90.0,  apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: 'Dobra 7 (90°)' },
+      { id: '313-8', n: 8, l: 68.30, w: null, esp: null, ap: 0.0,   apCorr: null, ac: null,  acCorr: null, r: 2.0, comment: 'Corte E' },
+    ],
+  },
 ];
 
 // Helper to normalize template names for deduplication & matching (ignores case, extra spaces, accents, and Portuguese articles like "da", "do", "de")
@@ -198,7 +220,7 @@ export const deduplicateTemplates = (list: PieceTemplate[]): PieceTemplate[] => 
       map.set(key, builtin);
     }
   });
-  // 2. Override with saved user/custom templates so user modifications always take precedence!
+  // 2. Add custom user templates (user saved edits take precedence!)
   list.forEach(tpl => {
     const key = normalizeTemplateKey(tpl.name);
     if (key) {
@@ -209,14 +231,12 @@ export const deduplicateTemplates = (list: PieceTemplate[]): PieceTemplate[] => 
 };
 
 export default function App() {
-  // Helper to sanitize steps loaded from localStorage (cleans up any stale torsion on coplanar step 5)
+  // Helper to sanitize steps loaded from localStorage without mutating saved values
   const sanitizeLoadedSteps = (rawSteps: any[]): BenderStep[] => {
-    return rawSteps.map((s: any, idx: number) => {
-      if (rawSteps.length === 6 && idx === 4 && s.ap === -90 && Math.abs(s.l - 43.5) < 1) {
-        return { ...s, ap: null, w: s.w !== undefined ? s.w : null };
-      }
-      return { ...s, w: s.w !== undefined ? s.w : null };
-    });
+    return rawSteps.map((s: any) => ({
+      ...s,
+      w: s.w !== undefined ? s.w : null
+    }));
   };
 
   // State for steps
@@ -628,6 +648,50 @@ export default function App() {
     localStorage.setItem('wafios_library_templates', JSON.stringify(libraryTemplates));
   }, [libraryTemplates]);
 
+  // Real-time synchronization of templates via Firebase Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeTemplatesFromFirestore((firestoreTemplates) => {
+      if (Array.isArray(firestoreTemplates) && firestoreTemplates.length > 0) {
+        setLibraryTemplates((prev) => deduplicateTemplates([...prev, ...firestoreTemplates]));
+      }
+    }, TEMPLATES);
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch custom templates from backend server on startup as fallback
+  useEffect(() => {
+    fetch('/api/custom-templates')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((serverTemplates) => {
+        if (Array.isArray(serverTemplates) && serverTemplates.length > 0) {
+          setLibraryTemplates((prev) => deduplicateTemplates([...prev, ...serverTemplates]));
+        }
+      })
+      .catch((err) => console.warn('Servidor de gabaritos customizados indisponível localmente:', err));
+  }, []);
+
+  const syncTemplateToServer = (template: PieceTemplate) => {
+    // 1. Save to Firebase Firestore (Real-time centralized cloud DB)
+    saveTemplateToFirestore(template);
+
+    // 2. Backup sync to backend server
+    fetch('/api/custom-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(template),
+    }).catch((e) => console.warn('Falha ao sincronizar gabarito com o servidor:', e));
+  };
+
+  const deleteTemplateFromServer = (templateName: string) => {
+    // 1. Delete from Firebase Firestore
+    deleteTemplateFromFirestore(templateName);
+
+    // 2. Backup delete from backend server
+    fetch(`/api/custom-templates/${encodeURIComponent(templateName)}`, {
+      method: 'DELETE',
+    }).catch((e) => console.warn('Falha ao remover gabarito do servidor:', e));
+  };
+
   // Compute stats on steps
   const totalLength = steps.reduce((sum, s) => sum + (s.l || 0), 0);
   const totalBends = steps.filter((s) => s.ac !== null && s.ac !== 0).length;
@@ -824,6 +888,8 @@ export default function App() {
       setLibraryTemplates(deduplicateTemplates([...libraryTemplates, updatedTpl]));
     }
 
+    syncTemplateToServer(updatedTpl);
+
     setSaveSuccessToast(`Modelo "${activeModelName}" salvo com sucesso! Edições mantidas permanentemente.`);
     setTimeout(() => {
       setSaveSuccessToast(null);
@@ -843,29 +909,37 @@ export default function App() {
 
     const targetKey = normalizeTemplateKey(trimmedName);
     const existingOtherIndex = libraryTemplates.findIndex((t, idx) => idx !== index && normalizeTemplateKey(t.name) === targetKey);
+    let savedTpl: PieceTemplate;
 
     if (existingOtherIndex !== -1) {
-      const updated = [...libraryTemplates];
-      updated[existingOtherIndex] = {
-        ...updated[existingOtherIndex],
+      savedTpl = {
+        ...libraryTemplates[existingOtherIndex],
         name: trimmedName,
-        description: editingTemplateDesc.trim() || updated[existingOtherIndex].description,
+        description: editingTemplateDesc.trim() || libraryTemplates[existingOtherIndex].description,
       };
+      const updated = [...libraryTemplates];
+      updated[existingOtherIndex] = savedTpl;
       const finalTemplates = updated.filter((_, idx) => idx !== index);
       setLibraryTemplates(deduplicateTemplates(finalTemplates));
     } else {
-      const updated = [...libraryTemplates];
-      updated[index] = {
-        ...updated[index],
+      savedTpl = {
+        ...libraryTemplates[index],
         name: trimmedName,
         description: editingTemplateDesc.trim(),
       };
+      const updated = [...libraryTemplates];
+      updated[index] = savedTpl;
       setLibraryTemplates(deduplicateTemplates(updated));
     }
+    syncTemplateToServer(savedTpl);
     setEditingTemplateIndex(null);
   };
 
   const handleDeleteTemplate = (index: number) => {
+    const target = libraryTemplates[index];
+    if (target) {
+      deleteTemplateFromServer(target.name);
+    }
     const updated = libraryTemplates.filter((_, idx) => idx !== index);
     setLibraryTemplates(deduplicateTemplates(updated));
     setDeletingTemplateIndex(null);
@@ -877,19 +951,21 @@ export default function App() {
 
     const targetKey = normalizeTemplateKey(trimmedName);
     const existingIndex = libraryTemplates.findIndex(t => normalizeTemplateKey(t.name) === targetKey);
+    let newTpl: PieceTemplate;
 
     if (existingIndex !== -1) {
-      const updated = [...libraryTemplates];
-      updated[existingIndex] = {
+      newTpl = {
         name: trimmedName,
-        description: newTemplateDesc.trim() || updated[existingIndex].description || 'Gabarito salvo a partir do simulador',
+        description: newTemplateDesc.trim() || libraryTemplates[existingIndex].description || 'Gabarito salvo a partir do simulador',
         rotationMode,
         wireDiameter,
         steps: steps.map(s => ({ ...s })),
       };
+      const updated = [...libraryTemplates];
+      updated[existingIndex] = newTpl;
       setLibraryTemplates(deduplicateTemplates(updated));
     } else {
-      const newTpl: PieceTemplate = {
+      newTpl = {
         name: trimmedName,
         description: newTemplateDesc.trim() || 'Gabarito salvo a partir do simulador',
         rotationMode,
@@ -899,6 +975,7 @@ export default function App() {
       setLibraryTemplates(deduplicateTemplates([...libraryTemplates, newTpl]));
     }
 
+    syncTemplateToServer(newTpl);
     setActiveModelName(trimmedName);
     setShowSaveLibraryModal(false);
   };
