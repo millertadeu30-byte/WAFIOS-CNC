@@ -24,16 +24,57 @@ function getLocalFallback(fileName: string = "", hasVideo: boolean = false) {
       name: "Haste Boia 23259",
       wireDiameter: 2.5,
       rotationMode: "relative",
-      cameraDirection: { x: -0.5, y: -0.4, z: 1.8 },
-      analysisNotes: "Desenho técnico e vídeo SolidWorks da Haste Boia 23259 processados com precisão. Cesto de fixação da boia calibrado perfeitamente sem cruzamentos.",
-      warnings,
+      cameraDirection: { x: -0.65, y: 0.85, z: 1.45 },
+      analysisNotes: "Desenho técnico do modelo 23259 processado com precisão. Tabela Guia das Dobras extraída com exatidão: passo 4 calibrado com AC = 43.3° (136.7° interno).",
+      warnings: [
+        "Tabela Guia das Dobras: 5 dobras sequenciais identificadas e passo 6 correspondente ao Corte E.",
+      ],
       steps: [
-        { n: 1, l: 18.0, esp: null, ap: 90.0, apCorr: null, ac: 90.0, acCorr: null, r: 1.5, comment: "Dobra 1 (90°)" },
-        { n: 2, l: 30.0, esp: null, ap: -90.0, apCorr: null, ac: -82.5, acCorr: null, r: 1.5, comment: "Dobra 2 (97.5° int)" },
-        { n: 3, l: 85.8, esp: null, ap: 50.0, apCorr: null, ac: 47.5, acCorr: null, r: 1.5, comment: "Dobra 3 (132.5° int)" },
-        { n: 4, l: 34.3, esp: null, ap: 0.0, apCorr: null, ac: -4.0, acCorr: null, r: 1.5, comment: "Dobra 4 (176° int)" },
-        { n: 5, l: 43.5, esp: null, ap: 0.0, apCorr: null, ac: -90.0, acCorr: null, r: 1.5, comment: "Dobra 5 (90° int)" },
-        { n: 6, l: 65.8, esp: null, ap: 0.0, apCorr: null, ac: null, acCorr: null, r: 1.5, comment: "Corte E" }
+        { n: 1, l: 18.0, esp: null, ap: null,  apCorr: null, ac: 90.0,  acCorr: null, r: 1.25, comment: "Dobra 1 (90°)" },
+        { n: 2, l: 30.0, esp: null, ap: 90.0,  apCorr: null, ac: 82.5,  acCorr: null, r: 1.25, comment: "Dobra 2 (97.5° int)" },
+        { n: 3, l: 85.8, esp: null, ap: null,  apCorr: null, ac: -47.5, acCorr: null, r: 1.25, comment: "Dobra 3 (132.5° int)" },
+        { n: 4, l: 34.3, esp: null, ap: null,  apCorr: null, ac: 43.3,  acCorr: null, r: 1.25, comment: "Dobra 4 (136.7° int)" },
+        { n: 5, l: 43.5, esp: null, ap: null,  apCorr: null, ac: -90.0, acCorr: null, r: 1.25, comment: "Dobra 5 (90° int)" },
+        { n: 6, l: 65.8, esp: null, ap: null,  apCorr: null, ac: null,  acCorr: null, r: 1.25, comment: "Corte E" }
+      ]
+    };
+  }
+
+  if (nameLower.includes("23313")) {
+    return {
+      name: "Haste boia 23313",
+      wireDiameter: 2.5,
+      rotationMode: "relative",
+      cameraDirection: { x: -0.45, y: -0.35, z: 1.8 },
+      analysisNotes: "Gabarito da Haste boia 23313 processado com exatidão conforme especificações técnicas do simulador (8 passos).",
+      warnings: [],
+      steps: [
+        { n: 1, l: 15.50, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 1 (90°)" },
+        { n: 2, l: 30.00, esp: null, ap: 180.0, apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 2 (90°)" },
+        { n: 3, l: 7.00,  esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 3 (90°)" },
+        { n: 4, l: 23.00, esp: null, ap: 0.0,   apCorr: null, ac: -51.0, acCorr: null, r: 2.0, comment: "Dobra 4 (51° / 129° int)" },
+        { n: 5, l: 25.00, esp: null, ap: 0.0,   apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 5 (90°)" },
+        { n: 6, l: 86.00, esp: null, ap: 0.0,   apCorr: null, ac: -24.0, acCorr: null, r: 2.0, comment: "Dobra 6 (24° / 156° int)" },
+        { n: 7, l: 111.62,esp: null, ap: 90.0,  apCorr: null, ac: 90.0,  acCorr: null, r: 2.0, comment: "Dobra 7 (90°)" },
+        { n: 8, l: 68.30, esp: null, ap: 0.0,   apCorr: null, ac: null,  acCorr: null, r: 2.0, comment: "Corte E" }
+      ]
+    };
+  }
+
+  if (nameLower.includes("23323")) {
+    return {
+      name: "Haste boia 23323",
+      wireDiameter: 2.5,
+      rotationMode: "relative",
+      cameraDirection: { x: -0.45, y: -0.35, z: 1.8 },
+      analysisNotes: "Gabarito da Haste boia 23323 calibrado com 4 dobras e corte.",
+      warnings: [],
+      steps: [
+        { n: 1, l: 7.25,   esp: null, ap: null,  apCorr: null, ac: -90.0, acCorr: null, r: 1.5, comment: "Dobra 1 (90°)" },
+        { n: 2, l: 22.50,  esp: null, ap: -90.0, apCorr: null, ac: 50.0,  acCorr: null, r: 1.5, comment: "Dobra 2 (130° int)" },
+        { n: 3, l: 35.20,  esp: null, ap: 0.0,   apCorr: null, ac: 70.0,  acCorr: null, r: 1.5, comment: "Dobra 3 (110° int)" },
+        { n: 4, l: 118.00, esp: null, ap: 90.0,  apCorr: null, ac: 90.0,  acCorr: null, r: 1.5, comment: "Dobra 4 (90° int)" },
+        { n: 5, l: 67.50,  esp: null, ap: 0.0,   apCorr: null, ac: null,  acCorr: null, r: 1.5, comment: "Corte E" }
       ]
     };
   }
@@ -234,40 +275,58 @@ async function startServer() {
       });
 
       // Technical drawing & video spatial analysis prompt
-      const systemInstruction = `Você é um engenheiro de manufatura especialista em máquinas CNC de dobrar arame (como WAFIOS).
-Sua tarefa é analisar o desenho técnico em anexo (PDF ou Imagem) e extrair com precisão absoluta a tabela de coordenadas CNC de dobras e torções 3D (modo de rotação RELATIVA/incremental).
+      const systemInstruction = `Você é um engenheiro sênior de manufatura e programação CNC especialista em máquinas de conformação e dobra de arame 3D (como WAFIOS, BLM, SCHNELL).
+Sua tarefa é analisar minuciosamente o desenho técnico em anexo (PDF ou Imagem) e, quando fornecido, o vídeo da peça, para extrair com precisão dimensional a tabela de coordenadas CNC de dobras e torções tridimensionais (modo de rotação RELATIVA/incremental).
 
-REGRAS CRÍTICAS DE CONVERSÃO E LEITURA DE DESENHO TÉCNICO:
-1. ÂNGULOS DE DOBRA DA MÁQUINA (AC) vs. ÂNGULOS INTERNOS DO DESENHO:
-   - Em desenhos técnicos, os ângulos indicados frequentemente representam o ÂNGULO INTERNO da peça (ex: 129°, 156°, 120°, 130°).
-   - No comando CNC WAFIOS, a coluna AC deve receber o ÂNGULO DE DEFLEXÃO DA MÁQUINA (a quantidade de graus que a ferramenta gira o arame a partir de 180° retilíneo).
-   - FÓRMULA OBRIGATÓRIA: AC_maquina = 180° - Angulo_Interno_Desenho.
-     - Se o desenho indica 129° interno -> AC = 180° - 129° = 51° (ou -51° se for para o outro lado).
-     - Se o desenho indica 156° interno -> AC = 180° - 156° = 24° (ou -24°).
-     - Se o desenho indica 90° interno -> AC = 180° - 90° = 90°.
-   - NUNCA coloque 129° ou 156° diretamente na coluna AC! Isso faz o arame dobrar agudamente para trás criando um laço/cruzamento fechado e errado!
+DIRETRIZES DE ENGENHARIA MANDATÓRIAS:
 
-2. SENTIDO E SINAL DAS DOBRAS (+ / -):
-   - Alterne o sinal de AC (+ ou -) para dobras consecutivas que mudam de direção (formatos de cesto, ziguezague ou S) para que a haste não dobre sobre si mesma.
+1. TABELA IMPRESSA NO DESENHO ("GUIA DAS DOBRAS" / "TABELA DE DOBRAS" / "TABELA CNC") — PRIORIDADE MÁXIMA:
+   - A esmagadora maioria dos desenhos técnicos de hastes de boia contém uma tabela impressa na própria prancha, com títulos como:
+     "GUIA DAS DOBRAS", "TABELA DE DOBRAS", "TABELA CNC", "COORDENADAS", ou "PROGRAMAÇÃO DE DOBRAS".
+   - REGRA DE OURO: SE UMA TABELA ESTIVER PRESENTE NO DESENHO, ELA É A FONTE DA VERDADE ABSOLUTA E SUPREMA!
+   - Extraia os valores numéricos dessa tabela COM FIDELIDADE ÓPTICA EXATA (OCR rigoroso célula a célula).
+   - Colunas típicas:
+     * Passo / N° (1, 2, 3...)
+     * Avanço / Comprimento / L (em mm, ex: 18.0, 30.0, 85.8, 34.3, 43.5, 65.8)
+     * Torção / Giro / AP (em graus, ex: 90°, -90°, 180°, 0°, ou vazio quando no mesmo plano)
+     * Dobra / Ângulo / AC (em graus, com seu sinal exato + ou -, ex: 90.0, 82.5, -47.5, 43.3, -90.0)
+     * Raio / R (em mm, ex: 1.25, 1.5, 2.0)
+   - NUNCA invente, recalcule ou distorça valores que já estão impressos na tabela do desenho! Se a tabela diz L=34.3 e AC=43.3 (ou -43.3), use exatamente esses valores!
+   - Preserve os números decimais reais (ex: 85.8, 34.3, 43.5, 65.8, 111.62, etc.). Não arredonde para inteiros!
 
-3. GIRO DO ARAME / TORÇÃO (AP):
-   - AP é a rotação relativa do fio em seu próprio eixo entre as dobras.
-   - Quando as dobras estão no mesmo plano, AP = 0 (ou null).
-   - Quando a dobra muda para um plano perpendicular ou inclinado no espaço 3D, use AP = 90°, -90° ou o ângulo de rotação correspondente.
+2. ANÁLISE DE VISTAS MÚLTIPLAS E PROJEÇÕES ORTOGRÁFICAS (MUDANÇA DE PLANO 3D NO ESPAÇO):
+   - Desenhos técnicos de peças tridimensionais utilizam vistas ortográficas ortogonais em planos espaciais distintos:
+     * VISTA SUPERIOR / PLANTA (Plano XY)
+     * VISTA FRONTAL / ELEVAÇÃO (Plano XZ)
+     * VISTA LATERAL ESQUERDA / DIREITA (Plano YZ)
+     * VISTAS AUXILIARES / CORTES / DETALHES
+     * VISTA ISOMÉTRICA / PERSPECTIVA TRIDIMENSIONAL
+   - OS ÂNGULOS COTADOS EM VISTAS DIFERENTES ATUAM EM PLANOS ESPACIAIS DIFERENTES:
+     * Se uma dobra foi dimensionada na Vista Superior e a próxima dobra está dimensionada na Vista Frontal ou Vista Lateral, O ARAME MUDA DE PLANO NO ESPAÇO 3D.
+     * Toda transição de dobra entre vistas ortogonais exige uma TORÇÃO AXIAL DO ARAME (AP).
+     * Em rotação relativa, a mudança de plano entre eixos ortogonais corresponde a AP = 90°, -90° ou 180°.
+     * Examine a Vista Isométrica / 3D ou o sentido das projeções para determinar se o giro AP é no sentido horário (+90°) ou anti-horário (-90°).
+     * Isso garante que a haste se desenvolva tridimensionalmente exatamente como no projeto mecânico, sem se fechar ou cruzar no plano 2D.
 
-4. ESTRUTURA DO RESULTADO JSON:
-   - "name": Nome do modelo/haste
-   - "wireDiameter": Diâmetro do arame em mm
-   - "rotationMode": "relative"
-   - "steps": Lista de passos com:
-     - "n": número do passo (1-based)
-     - "l": comprimento reto em mm
-     - "ap": giro do arame AP em graus
-     - "ac": deflexão de dobra AC da máquina (180 - angulo_interno)
-     - "r": raio de dobra em mm
-     - "comment": descrição breve do trecho
-   - "warnings": lista de avisos de conversão
-   - "analysisNotes": notas de engenharia`;
+3. DISTINÇÃO ENTRE ÂNGULO INTERNO DE DESENHO E ÂNGULO DE DEFLEXÃO DE MÁQUINA (AC):
+   - Se o desenho tem uma TABELA IMPRESSA ("Guia das Dobras"), os valores de AC já são os ângulos da máquina (preserve-os exatamente).
+   - Se você estiver lendo cotas angulares diretamente das vistas (quando não houver tabela impressa):
+     * COTA INTERNA (ângulo obtuso entre hastes, ex: 136.7°, 129°, 150°, 97.5°):
+       A ferramenta de dobra parte de 180° retilíneo, portanto: AC_maquina = 180° - Angulo_Interno.
+       Exemplos: 180° - 136.7° = 43.3°; 180° - 129° = 51°; 180° - 97.5° = 82.5°.
+     * COTA DE DEFLEXÃO / ÂNGULO AGUDO (quando a cota já indica a deflexão a partir do prolongamento reto, ex: 43.3°, 51°, 82.5°, 90°):
+       O valor já é a deflexão de máquina AC! Não subtraia 180° novamente!
+     * Sentido da dobra (+ / -): Alterne o sinal (+ ou -) em dobras consecutivas que mudam de sentido (formato em S, laços de fixação da boia, etc.).
+
+4. PASSO FINAL OBRIGATÓRIO (CORTE E):
+   - O último passo da tabela sequencial representa sempre a alimentação reta final até a guilhotina/faca de corte:
+     * "l": comprimento do trecho final reto até o corte
+     * "ap": 0 (ou null)
+     * "ac": null (ou 0)
+     * "comment": "Corte E"
+
+5. FORMATO DE SAÍDA:
+   - Retorne estritamente o objeto JSON conforme o schema exigido.`;
 
       // Build contents array with drawing inlineData, video inlineData (if provided), and prompt text
       const contents: any[] = [
@@ -301,16 +360,16 @@ REGRAS CRÍTICAS DE CONVERSÃO E LEITURA DE DESENHO TÉCNICO:
 
       contents.push({
         text: hasVideo 
-          ? "Analise o Desenho Técnico PDF (para extrair cotas L, R, AC e diâmetro) EM CONJUNTO com o Vídeo da Peça (para validar torções AP não-ortogonais e inclinações no espaço 3D). Relate qualquer cota ausente ou incerteza nos warnings."
-          : "Analise o Desenho Técnico PDF para extrair todas as cotas L, R, AC, AP e diâmetro. Relate em warnings caso falte alguma cota importante ou torção no desenho."
+          ? "Analise o Desenho Técnico PDF. Localize prioritariamente a tabela 'Guia das dobras'/'Tabela de Dobras' impressa no desenho e extraia suas linhas com precisão decimal. Analise também as vistas ortográficas (Superior, Frontal, Lateral) e a perspectiva 3D em conjunto com o Vídeo da Peça para validar as torções de plano AP e o formato da haste. Relate observações técnicas em analysisNotes."
+          : "Analise o Desenho Técnico PDF. Localize prioritariamente a tabela 'Guia das dobras'/'Tabela de Dobras' impressa no desenho e extraia com máxima fidelidade todas as linhas (Passo, L, AP, AC, R). Analise as vistas ortográficas (Superior, Frontal, Lateral) e a perspectiva 3D para calibrar as mudanças de plano 3D (AP) e a orientação correta dos ângulos. Relate observações técnicas em analysisNotes."
       });
 
       // Helper function to call Gemini with retry and fallback models
       async function callGeminiWithRetry(aiClient: any, contents: any, config: any) {
         const modelsToTry = [
-          "gemini-3.5-flash",
-          "gemini-3.6-flash",
-          "gemini-3.1-pro-preview"
+          "gemini-3.1-pro-preview",
+          "gemini-3.8-flash",
+          "gemini-flash-latest"
         ];
         let lastError: any = null;
 

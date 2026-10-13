@@ -259,6 +259,28 @@ export default function ProgramTable({
     onSelectStep(null);
   };
 
+  // Invert all signs in a given column ('ac' | 'ap')
+  const handleInvertColumnSigns = (field: 'ac' | 'ap') => {
+    const rawUpdatedSteps = steps.map((step, idx) => {
+      const isLastRow = idx === steps.length - 1;
+      // Do not invert cut step if it's 0 or null
+      if (isLastRow && (step[field] === null || step[field] === 0)) {
+        return step;
+      }
+      const val = step[field];
+      if (val === null || val === undefined || val === 0) {
+        return step;
+      }
+      return {
+        ...step,
+        [field]: parseFloat((-val).toFixed(2)),
+      };
+    });
+
+    const enforced = enforceTorsionAndCorteRules(rawUpdatedSteps, rotationMode);
+    onStepsChange(enforced);
+  };
+
   // Get bend direction symbol (X* column)
   const getBendDirectionIcon = (ac: number | null) => {
     if (ac === null || ac === 0) return '—';
@@ -322,10 +344,40 @@ export default function ProgramTable({
               <th className="py-3 px-2 text-center w-24">Avanço (L)</th>
               <th className="py-3 px-2 text-center w-16">Esp</th>
               <th className="py-3 px-2 text-center w-28">
-                <div>Torção (AP)</div>
+                <div className="flex items-center justify-center gap-1.5">
+                  <span>Torção (AP)</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInvertColumnSigns('ap');
+                    }}
+                    className="inline-flex items-center justify-center h-4 px-1 rounded bg-[#2D3748] hover:bg-purple-600/30 text-slate-300 hover:text-purple-300 border border-[#4A5568] hover:border-purple-500/60 text-[9px] font-mono transition-all cursor-pointer shadow-sm active:scale-95"
+                    title="Inverter todos os sinais da coluna Torção (AP) (+ para - e vice-versa)"
+                    id="btn-invert-ap-signs"
+                  >
+                    ±
+                  </button>
+                </div>
                 <div className="text-[9px] text-purple-400/80 font-sans font-normal lowercase">(máx ±200° acum.)</div>
               </th>
-              <th className="py-3 px-2 text-center w-28">Dobra (AC)</th>
+              <th className="py-3 px-2 text-center w-28">
+                <div className="flex items-center justify-center gap-1.5">
+                  <span>Dobra (AC)</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInvertColumnSigns('ac');
+                    }}
+                    className="inline-flex items-center justify-center h-4 px-1 rounded bg-[#2D3748] hover:bg-orange-600/30 text-slate-300 hover:text-orange-300 border border-[#4A5568] hover:border-orange-500/60 text-[9px] font-mono transition-all cursor-pointer shadow-sm active:scale-95"
+                    title="Inverter todos os sinais da coluna Dobra (AC) (+ para - e vice-versa)"
+                    id="btn-invert-ac-signs"
+                  >
+                    ±
+                  </button>
+                </div>
+              </th>
               <th className="py-3 px-2 text-center w-16">Raio (r)</th>
               <th className="py-3 px-2 text-center w-20 text-blue-400 font-semibold bg-blue-950/20 border-l border-[#2D3748]">Desenho*</th>
               <th className="py-3 px-3">Comentários</th>
